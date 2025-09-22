@@ -9,9 +9,28 @@ export default function Panels() {
   const setSilk     = useSim(s => s.setSilk);
   const finish = useSim(s => s.finish);
   const setFinish = useSim(s => s.setFinish);
+  const acrylic     = useSim(s => s.acrylic);
+  const setAcrylic  = useSim(s => s.setAcrylic);
 
   return (
     <div className="space-y-6 text-sm">
+      <section className="mb-4">
+        <h3 className="font-semibold mb-2">Focar</h3>
+        <button
+          onClick={() => {
+            const detail = {
+              pos: [0.725, 1.310, 0.240] as [number, number, number],
+              look: [0.717, 1.271, -0.510] as [number, number, number],
+              duration: 0.6, // seconds (tween). Use 0 for instant jump.
+            };
+            window.dispatchEvent(new CustomEvent('go-to-cam-pose', { detail } as any));
+          }}
+          className="px-3 py-1 rounded border hover:bg-black/5"
+        >
+          Zoom In
+        </button>
+      </section>
+
       <section>
         <h3 className="font-semibold mb-2">Animação</h3>
         <button
@@ -26,13 +45,18 @@ export default function Panels() {
         <h3 className="font-semibold mb-2">Puxador</h3>
         <div className="flex gap-2">
           <button
+            onClick={() => setHandle('')}   // ← empty = restore original
+            className="px-3 py-1 rounded border hover:bg-black/5"
+          >
+            Padrão
+          </button>
+          <button
             onClick={() => setHandle('/handles/Handle_2.glb')}
             className="px-3 py-1 rounded border hover:bg-black/5"
           >
-            Usar Handle 2
+            Handle 2
           </button>
         </div>
-        <p className="opacity-60 mt-1">Coloque o ficheiro em <code>/public/handles/Handle_2.glb</code>.</p>
       </section>
 
       <section>
@@ -51,6 +75,28 @@ export default function Panels() {
         </div>
       </section>
 
+        <section>
+        <h3 className="font-semibold mb-2">Acrílico do Vidro</h3>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setAcrylic('clear')}
+            className={`px-3 py-1 rounded border ${
+              acrylic === 'clear' ? 'bg-black text-white' : 'hover:bg-black/5'
+            }`}
+          >
+            Liso / Transparente
+          </button>
+          <button
+            onClick={() => setAcrylic('aguaviva')}
+            className={`px-3 py-1 rounded border ${
+              acrylic === 'aguaviva' ? 'bg-black text-white' : 'hover:bg-black/5'
+            }`}
+          >
+            Água Viva
+          </button>
+        </div>
+      </section>
+
       <section>
         <h3 className="font-semibold mb-2">Serigrafia</h3>
         <div className="flex flex-wrap gap-2">
@@ -61,42 +107,12 @@ export default function Panels() {
             Aplicar SER001
           </button>
           <button
-            onClick={() => setSilk({ url: '', opacity: 1 })}
+            onClick={() => setSilk({ url: '' })}
             className="px-3 py-1 rounded border hover:bg-black/5"
           >
             Limpar
           </button>
         </div>
-
-        <div className="mt-3 space-y-2">
-          <label className="block">
-            Opacidade
-            <input
-              type="range" min={0} max={1} step={0.05}
-              onChange={(e) => setSilk({ opacity: Number(e.target.value) })}
-              defaultValue={1}
-              className="w-full"
-            />
-          </label>
-          <label className="block">
-            Rugosidade (ink)
-            <input
-              type="range" min={0} max={1} step={0.05}
-              onChange={(e) => setSilk({ roughness: Number(e.target.value) })}
-              defaultValue={0.2}
-              className="w-full"
-            />
-          </label>
-        </div>
-      </section>
-
-      <section>
-        <h3 className="font-semibold mb-2">Estado</h3>
-        <ul className="list-disc ml-5 space-y-1">
-          <li>Vidro otimizado para web.</li>
-          <li>Planos <code>glass_silk_x</code> em Alpha Blend.</li>
-          <li>Alumínio base “Cromado”.</li>
-        </ul>
       </section>
     </div>
   );

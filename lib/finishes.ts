@@ -14,7 +14,7 @@ export const FINISH_META: Record<FinishName, {
   metalness?: number;   // ← add this
 }> = {
   Amarelo:{hex:'#d7b400',roughness:0.35,metalness:0},
-  Anodizado:{hex:'#c8c8c8',roughness:0.22,normalScale:0.4,metalness:1},  // ← metal
+  Anodizado:{hex:'#c8c8c8',roughness:0.22,normalScale:0.4,metalness:0.8},  // ← metal
   AzulClaro:{hex:'#7aa7ff',roughness:0.3,metalness:0},
   AzulEscuro:{hex:'#2e4f9b',roughness:0.28,metalness:0},
   AzulTurquesa:{hex:'#2fa8a8',roughness:0.3,metalness:0},

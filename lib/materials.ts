@@ -4,11 +4,17 @@ export const isAluminum = (m?: THREE.Material) =>
   !!m && 'name' in m && typeof (m as any).name === 'string' &&
   ((m as any).name === 'mat_aluminum' || (m as any).name?.startsWith('mat_aluminum'));
 
-export const isGlass = (m?: THREE.Material) =>
-  !!m && (m as any).name === 'Glass_material';
+export const isGlass = (m?: THREE.Material) => {
+  if (!m) return false;
+  const any = m as any;
+  // Any physical material that looks like glass by name OR has transmission
+  const name = (any.name ?? '').toString().toLowerCase();
+  return !!any.isMeshPhysicalMaterial && (name.includes('glass') || any.transmission !== undefined);
+};
 
 export const isSilk = (m?: THREE.Material) =>
   !!m && (m as any).name === 'MT_silkscreen';
+
 export function tuneGlass(m: THREE.MeshPhysicalMaterial) {
   // Wipe any stray maps that can add haze
   (m as any).map = null;
@@ -18,14 +24,14 @@ export function tuneGlass(m: THREE.MeshPhysicalMaterial) {
 
   m.color.set(0xffffff);
   m.metalness = 0.0;
-  m.roughness = 0.0;             // razor-sharp highlights
+  m.roughness = 0.035;             // razor-sharp highlights
   m.ior = 1.45;
   m.thickness = 0.004;           // ~4 mm
   m.attenuationColor = new THREE.Color(0xffffff);
   m.attenuationDistance = 100;   // essentially clear
 
   m.transparent = true;
-  m.transmission = 1.0;          // max light through
+  m.transmission = 0.98;          // max light through
   m.opacity = 1.0;
 
   // Let glass write to the depth buffer (prevents additive "fog")
@@ -48,15 +54,17 @@ export function tuneGlass(m: THREE.MeshPhysicalMaterial) {
 }
 
 export function tuneSilk(m: THREE.MeshStandardMaterial) {
-  m.transparent = true;
-  m.opacity = 1.0;
-  m.alphaTest = 0.0;
-  m.depthWrite = false;
-  m.side = THREE.FrontSide;    // silk planes face camera; front is enough
-  m.roughness = 0.2;           // matte ink feel
+  m.transparent = true;      // needed so alphaTest reads PNG alpha
+  m.alphaTest = 0.5;         // cut-out → crisp paint edges
+  m.depthWrite = true;       // stable when seen through glass
+  m.depthTest = true;
+  m.side = THREE.DoubleSide; // ✅ paint visible on both faces
+  m.metalness = 0.0;
+  m.roughness = 0.55;        // matte ink feel
   (m as any).envMapIntensity = 0.0;
   m.needsUpdate = true;
 }
+
 
 export function tuneAluminum(m: THREE.MeshStandardMaterial) {
   // Default “Cromado” if no texture customization yet
