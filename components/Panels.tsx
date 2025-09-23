@@ -12,9 +12,15 @@ export default function Panels() {
   const acrylic     = useSim(s => s.acrylic);
   const setAcrylic  = useSim(s => s.setAcrylic);
 
+  const model = useSim(s => s.model);
+  const stage = useSim(s => s.stage);
+  const setModel = useSim(s => s.setModel);
+  const setStage = useSim(s => s.setStage);
+
   return (
     <div className="space-y-6 text-sm">
-      <section className="mb-4">
+       
+      {/*<section className="mb-4">
         <h3 className="font-semibold mb-2">Focar</h3>
         <button
           onClick={() => {
@@ -29,7 +35,7 @@ export default function Panels() {
         >
           Zoom In
         </button>
-      </section>
+      </section>*/}
 
       <section>
         <h3 className="font-semibold mb-2">Animação</h3>
@@ -42,21 +48,46 @@ export default function Panels() {
       </section>
 
       <section>
-        <h3 className="font-semibold mb-2">Puxador</h3>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setHandle('')}   // ← empty = restore original
-            className="px-3 py-1 rounded border hover:bg-black/5"
-          >
-            Padrão
-          </button>
-          <button
-            onClick={() => setHandle('/handles/Handle_2.glb')}
-            className="px-3 py-1 rounded border hover:bg-black/5"
-          >
-            Handle 2
-          </button>
-        </div>
+        <h3 className="font-semibold mb-2">Puxadores</h3>
+
+        {/** state */}
+        {(() => {
+          const handleKey = useSim(s => s.handleKey);           // e.g. "Handle_2" or undefined for default
+          const setHandle = useSim(s => s.setHandle);
+
+          // Helper: which button is active?
+          const isActive = (k?: string) => (k ? handleKey === k : !handleKey);
+
+          // List your buttons once; `key` is just the basename without .glb
+          const HANDLES = [
+            { label: 'Puxador 1', key: 'Handle_1', url: '/handles/Handle_1.glb' },
+            { label: 'Puxador 2', key: 'Handle_2', url: '/handles/Handle_2.glb' },
+            { label: 'Puxador 3', key: 'Handle_3', url: '/handles/Handle_3.glb' },
+            { label: 'Puxador 4', key: undefined, url: '' }, // default/original
+            { label: 'Puxador 5', key: 'Handle_5', url: '/handles/Handle_5.glb' },
+            { label: 'Puxador 6', key: 'Handle_6', url: '/handles/Handle_6.glb' },
+            { label: 'Puxador 7', key: 'Handle_7', url: '/handles/Handle_7.glb' },
+            // { label: 'Puxador 8', key: 'Handle_8', url: '/handles/Handle_8.glb' },
+          ];
+
+          return (
+            <div className="grid grid-cols-2 gap-2 max-h-56 overflow-auto pr-1">
+              {HANDLES.map(h => (
+                <button
+                  key={h.key ?? 'default'}
+                  onClick={() => setHandle(h.url)}
+                  className={`px-3 py-1 rounded border text-left ${
+                    isActive(h.key) ? 'bg-black text-white' : 'hover:bg-black/5'
+                  }`}
+                  aria-pressed={isActive(h.key)}
+                  title={h.label}
+                >
+                  {h.label}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
       </section>
 
       <section>
