@@ -13,17 +13,13 @@ import { EffectComposer, SMAA } from '@react-three/postprocessing';
 import { SMAAPreset } from 'postprocessing'; 
 import { useLayoutEffect } from 'react';
 import { getPresetForModel, clampBoxFrom } from '@/lib/cameraPresets';
-
+import { getShelfPresetForModel } from '@/lib/shelfPresets';
 
 const DEBUG_FINISH_LOGS = true; // flip to false to silence logs
 
 THREE.Cache.enabled = true;
 
 type GlassMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>;
-
-
-
-
 
 function formatVec(v: THREE.Vector3) {
   return `[${v.x.toFixed(3)}, ${v.y.toFixed(3)}, ${v.z.toFixed(3)}]`;
@@ -122,6 +118,38 @@ function CameraGoto({ controlsRef }: { controlsRef: React.RefObject<any> }) {
   return null;
 }
 
+function makeNoiseNormal(size = 64) {
+  const pixels = size * size;
+  const data = new Uint8Array(pixels * 4); // RGBA
+
+  for (let i = 0; i < pixels; i++) {
+    // Near-flat normal (128,128,255) with a little jitter on R/G
+    const j = Math.floor(Math.random() * 10) - 5; // -5..+4
+    const r = 128 + j;
+    const g = 128 + j;
+    const b = 255;
+    const a = 255;
+
+    const idx = i * 4;
+    data[idx + 0] = r;
+    data[idx + 1] = g;
+    data[idx + 2] = b;
+    data[idx + 3] = a;
+  }
+
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  // Normal maps are *data* textures — keep default (no colorSpace).
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const FROST_NOISE = makeNoiseNormal(64);
+
+
+const isMat__Aluminum = (m: any) =>
+  ((m?.name ?? '') as string).toLowerCase().replace(/\s+/g, '') === 'mat__aluminum';
+
 async function applyFinishToMats(
   mats: THREE.MeshStandardMaterial[],
   name: FinishName,
@@ -177,21 +205,45 @@ async function applyFinishToMats(
 // For handles
 function applyFinishToNode(
   node: THREE.Object3D,
-  sample: THREE.MeshStandardMaterial | null
+  sample: THREE.MeshStandardMaterial | null | undefined,
+  shouldPaint?: (m: any) => boolean     // NEW (optional filter)
 ) {
   if (!sample) return;
+
   node.traverse((n) => {
-    const mat: any = (n as any).material;
-    const paint = (mm: any) => {
-      if (mm?.isMeshStandardMaterial || mm?.isMeshPhysicalMaterial) {
-        const t = mm as THREE.MeshStandardMaterial;
-        t.copy(sample);
-        t.color.copy(sample.color);
-        (t as any).envMapIntensity = (sample as any).envMapIntensity ?? 1.0;
-        t.needsUpdate = true;
+    const mats = Array.isArray((n as any).material)
+      ? ((n as any).material as THREE.Material[])
+      : ((n as any).material ? [(n as any).material as THREE.Material] : []);
+
+    mats.forEach((mm: any) => {
+      if (!mm || !(mm.isMeshStandardMaterial || mm.isMeshPhysicalMaterial)) return;
+
+      // apply filter if provided
+      if (shouldPaint) {
+        try {
+          if (!shouldPaint(mm)) return;
+        } catch { return; }
       }
-    };
-    Array.isArray(mat) ? mat.forEach(paint) : paint(mat);
+
+      // copy fields (no mm.copy to avoid surprises)
+      if (sample.color && mm.color?.copy) mm.color.copy(sample.color);
+      mm.map = sample.map ?? null;
+
+      if ('metalness' in mm) mm.metalness = (sample as any).metalness ?? mm.metalness;
+      if ('roughness' in mm) mm.roughness = (sample as any).roughness ?? mm.roughness;
+
+      mm.roughnessMap = (sample as any).roughnessMap ?? null;
+      mm.normalMap    = (sample as any).normalMap ?? null;
+
+      if (mm.normalScale && (sample as any).normalScale?.x !== undefined) {
+        mm.normalScale.copy((sample as any).normalScale);
+      }
+
+      (mm as any).envMapIntensity =
+        (sample as any).envMapIntensity ?? (mm as any).envMapIntensity ?? 1.0;
+
+      mm.needsUpdate = true;
+    });
   });
 }
 
@@ -266,8 +318,6 @@ useEffect(() => {
 }, [enabled, camera, gl, scene, controlsRef, min, max]);
   return null;
 }
-
-
 function ClampControls({
   controlsRef, enabled, min, max,
 }: {
@@ -287,7 +337,6 @@ function ClampControls({
   });
   return null;
 }
-
 function ShowerHotspot({
   position,
   onClick,
@@ -328,6 +377,54 @@ function ShowerHotspot({
   );
 }
 
+// Normalize names once
+const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, '');
+
+// matches the hinge nodes and the new material name
+const isShelfHingeName  = (name: string) => norm(name).startsWith('shelf_hinge');
+const isShelfFixMat     = (m: any) => typeof m?.name === 'string' && norm(m.name) === 'alum';
+
+// keep a copy of originals so "Padrão" restores correctly
+const origByMat_FixBar  = new WeakMap<THREE.Material, THREE.Material>();
+const origByMat_Shelf   = new WeakMap<THREE.Material, THREE.Material>();
+
+// copy sample → target (safer than t.copy(sample) when types differ)
+function paintWithSample(
+  sample: THREE.MeshStandardMaterial,
+  mm: any
+) {
+  if (!mm || !(mm.isMeshStandardMaterial || mm.isMeshPhysicalMaterial)) return;
+  if (sample.color && mm.color?.copy) mm.color.copy(sample.color);
+  mm.map          = sample.map ?? null;
+  mm.normalMap    = (sample as any).normalMap ?? null;
+  mm.roughnessMap = (sample as any).roughnessMap ?? null;
+
+  if ('metalness' in mm) mm.metalness = (sample as any).metalness ?? mm.metalness;
+  if ('roughness' in mm) mm.roughness = (sample as any).roughness ?? mm.roughness;
+
+  if (mm.normalScale && (sample as any).normalScale?.x !== undefined) {
+    mm.normalScale.copy((sample as any).normalScale);
+  }
+  (mm as any).envMapIntensity =
+    (sample as any).envMapIntensity ?? (mm as any).envMapIntensity ?? 1.0;
+
+  mm.needsUpdate = true;
+}
+
+// restore from our snapshot
+function restoreFromSnapshot(mm: any, snap?: THREE.Material | null) {
+  if (!snap || !mm || !(mm.isMaterial && snap.isMaterial)) return;
+  // Both Standard and Physical implement copy()
+  if (typeof (mm as any).copy === 'function') {
+    (mm as any).copy(snap);
+    // colors on MeshPhysicalMaterial sometimes need an explicit copy
+    if ((snap as any).color && (mm as any).color?.copy) {
+      (mm as any).color.copy((snap as any).color);
+    }
+    (mm as any).needsUpdate = true;
+  }
+}
+
 function Product() {
 
     // ---------- scene selection ----------
@@ -342,7 +439,30 @@ function Product() {
 
   const currentSwapRoots = useRef<Set<THREE.Object3D>>(new Set()); // Handle
 
+  const shelfCorner = useSim(s => s.shelfCorner);
 
+  const shelfGltf = useGLTF('/shelves/side_shelf.glb');
+  const shelfRoot = useRef<THREE.Group>(new THREE.Group());
+
+  const finishJobId = useRef(0); //For hinge color
+
+    useEffect(() => {
+    // make sure our group is attached to the current scene root
+    gltf.scene.add(shelfRoot.current);
+    return () => {
+      // detach on unmount / when scene changes
+      gltf.scene.remove(shelfRoot.current);
+    };
+  }, [gltf.scene]);
+
+  //Shelf
+  const shelfHingeMatsRef = useRef<any[]>([]);
+  const isUnderShelf = (o: THREE.Object3D) => {
+    let a: THREE.Object3D | null = o;
+    const root = shelfRoot.current;
+    while (a) { if (a === root) return true; a = a.parent as any; }
+    return false;
+  };
   // all outer glass meshes (Glass_material)
   const outerGlass = useRef<GlassMesh[]>([]);
   // original-outer -> inner-shell clone
@@ -368,8 +488,47 @@ function Product() {
     return inner;
   }
 
+  // Softer frosted with a *tiny* blur, lightweight
+  function applyFrostedOuter(outer: THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>) {
+    const m = outer.material as THREE.MeshPhysicalMaterial;
 
-  
+    // OUTER (viewer side): mild frost
+    m.roughness = 0.64;           // tiny blur (was 0.72 in the ultra-soft version)
+    m.transmission = 0.78;        // a little clearer than before
+    m.ior = 1.03;                 // low distortion
+    m.thickness = 0.006;
+    m.attenuationColor.set(0xffffff);
+    m.attenuationDistance = 0.32; // a hair less milky than before
+    m.clearcoat = 0.0;
+    m.clearcoatRoughness = 0.0;
+    (m as any).envMapIntensity = 0.55;
+
+    // micro-noise normal to softly scatter reflections
+    m.normalMap = FROST_NOISE;
+    m.normalScale.set(0.14, 0.14);   // **small** jitter = subtle blur
+    m.side = THREE.FrontSide;
+    m.depthWrite = true;
+    m.depthTest  = true;
+    m.needsUpdate = true;
+
+    // INNER (backface): slightly stronger blur → averages into a faint background blur
+    const inner = ensureInnerShellFor(outer);
+    inner.visible = true;
+    const im = inner.material as THREE.MeshPhysicalMaterial;
+    im.copy(m);
+    im.side = THREE.BackSide;
+
+    // push a touch more blur inside
+    im.roughness = 0.7;             // +0.06 vs outer
+    im.transmission = 0.74;         // a tad less see-through than outer
+    im.normalMap = FROST_NOISE;
+    im.normalScale.set(0.18, 0.18); // inner jitter slightly stronger
+    // slight polygon offset to help stability
+    im.polygonOffset = true;
+    im.polygonOffsetFactor = -0.5;
+
+    im.needsUpdate = true;
+  }
   const resetToClearGlass = (outer: THREE.Mesh) => {
   const mp = outer.material as THREE.MeshPhysicalMaterial;
 
@@ -382,22 +541,33 @@ function Product() {
   if (inner) inner.visible = false;
 
   mp.needsUpdate = true;
-};
-
+  };
+  const clearAcrylicMapsButKeepBase = (outer: THREE.Mesh) => {
+    const om = outer.material as THREE.MeshPhysicalMaterial;
+    om.normalMap = null;
+    om.roughnessMap = null as any;
+    (om as any).thicknessMap = null as any;
+    (om as any).clearcoatNormalMap = null as any;
+    om.needsUpdate = true;
+  };
+  const applyGlassFinishNow = (outer: THREE.MeshPhysicalMaterial, finish: 'transparent' | 'frosted') => {
+    if (finish === 'transparent') {
+      outer.roughness = 0.02;
+      outer.transmission = 1.0;
+      outer.clearcoat = 0.5;
+      outer.clearcoatRoughness = 0.06;
+      (outer as any).envMapIntensity = 1.2;
+    } else {
+      outer.roughness = 0.55;
+      outer.transmission = 0.85;
+      outer.clearcoat = 0.0;
+      outer.clearcoatRoughness = 0.0;
+      (outer as any).envMapIntensity = 0.7;
+    }
+    outer.needsUpdate = true;
+  };
+  const glassFinish = useSim(s => s.glassFinish);
   type GlassMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>;
-
-  // Return all meshes that use a "glass-like" physical material right now
-  function getGlassMeshes(): GlassMesh[] {
-    const out: GlassMesh[] = [];
-    gltf.scene.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      const mat: any = (mesh as any).material;
-      const pick = (m: any) => { if (m && isGlass(m) && m.isMeshPhysicalMaterial) out.push(mesh as GlassMesh); };
-      Array.isArray(mat) ? mat.forEach(pick) : pick(mat);
-    });
-    return out;
-  }
-
 
   // Sharp aluminum profile fixing
   const gl = useThree(s => s.gl);
@@ -423,6 +593,7 @@ function Product() {
       if (!mat) return;
 
       if (isGlass(mat) && mat.isMeshPhysicalMaterial) {
+        if (isUnderShelf(mesh)) return;
         tuneGlass(mat);
         mat.side = THREE.FrontSide; // base glass, acrylics live here
       } else if (isAluminum(mat) && mat.isMeshStandardMaterial) {
@@ -447,26 +618,55 @@ function Product() {
   }, [gltf.scene]);
 
   const finish = useSim(s => s.finish);
+  function repaintShelfHinges(sample: THREE.MeshStandardMaterial | null) {
+  if (!sample) return;
+  const mats = shelfHingeMatsRef.current;
+  if (!mats.length) return;
 
+  mats.forEach(mm => {
+    if (!origByMat_Shelf.has(mm)) {
+      origByMat_Shelf.set(mm, (mm as THREE.Material).clone());
+    }
+    paintWithSample(sample, mm);
+  });
+}
   useEffect(() => {
-    const mats = Array.from(aluminumMats.current);
-    if (!mats.length) return;
-    (async () => {
-      await applyFinishToMats(mats, finish as FinishName, aniso);
-      lastAluminumSample.current = mats[0] ?? null;
+  const mats = Array.from(aluminumMats.current);
+  if (!mats.length) return;
 
-      // NEW: repaint any already attached Handle_2 swaps with the fresh sample
-      const sample = lastAluminumSample.current;
-      if (sample && currentSwapRoots.current.size) {
-        currentSwapRoots.current.forEach(root => applyFinishToNode(root, sample));
-      }
-    })();
-  }, [gltf.scene, finish, aniso]);
+  const myId = ++finishJobId.current; // mark this run as the latest
+
+  (async () => {
+    await applyFinishToMats(mats, finish as FinishName, aniso);
+    if (myId !== finishJobId.current) return; // stale run → bail
+
+    const sample = mats[0] ?? null;
+    lastAluminumSample.current = sample;
+    
+    if (sample && fixBarMode === 'finish') {
+      // repaint already-collected Fixing Bar materials with the new finish
+      fixBarMatsRef.current.forEach(mm => paintWithSample(sample, mm));
+    }
+
+    // repaint any swapped handles with fresh sample
+    if (sample && currentSwapRoots.current.size) {
+      currentSwapRoots.current.forEach(root => applyFinishToNode(root, sample));
+    }
+    // repaint shelf (only mat__aluminum parts)
+        if (sample && shelfRoot.current.children.length > 0) {
+          applyFinishToNode(shelfRoot.current, sample, isMat__Aluminum);
+        }
+
+        // ✅ NEW: immediately repaint hinges/fix bars if their mode is “finish”
+        if (sample && shelfMode === 'finish')  repaintShelfHinges(sample);
+      })();
+
+
+}, [gltf.scene, finish, aniso]);
+
 
 
 // Remember original handle material & the swapped handle's aluminum mats
-const originalHandleMats = useRef(new WeakMap<THREE.Mesh, THREE.Material | THREE.Material[]>());
-const swappedAluminumByHost = useRef(new WeakMap<THREE.Mesh, THREE.MeshStandardMaterial[]>());
 const lastAluminumSample = useRef<THREE.MeshStandardMaterial | null>(null);
 
 function copyFinishFromSample(sample: THREE.MeshStandardMaterial, targets: THREE.MeshStandardMaterial[]) {
@@ -676,7 +876,9 @@ useEffect(() => {
 
     outers.forEach((outer) => {
       // hard-stop any acrylic leftovers
-      resetToClearGlass(outer);
+      clearAcrylicMapsButKeepBase(outer);
+      // ✅ re-assert current glass type immediately so “Fosco” stays frosted
+      applyGlassFinishNow(outer.material as THREE.MeshPhysicalMaterial, glassFinish);
 
       removeOverlay(outer);
       const overlay = new THREE.Mesh(outer.geometry, inkMat);
@@ -685,24 +887,24 @@ useEffect(() => {
       outer.add(overlay);
     });
   });
-}, [silk?.url, gltf.scene]);
+}, [silk?.url, glassFinish, gltf.scene]);
 
   // Collect unique Glass_material (MeshPhysicalMaterial) for acrylic tweaks
   const glassMats = useRef<THREE.MeshPhysicalMaterial[]>([]);
 
-  useEffect(() => {
-    const set = new Set<GlassMesh>();
-    gltf.scene.traverse((o) => {
-      const m: any = (o as any).material;
-      const grab = (mat: any) => {
-        if (isGlass(mat) && mat.isMeshPhysicalMaterial) set.add(o as GlassMesh);
-      };
-      if (Array.isArray(m)) m.forEach(grab); else if (m) grab(m);
-    });
-    outerGlass.current = [...set];
-  }, [gltf.scene]);
-
-
+useEffect(() => {
+  const set = new Set<GlassMesh>();
+  gltf.scene.traverse((o) => {
+    const m: any = (o as any).material;
+    const grab = (mat: any) => {
+      if (isGlass(mat) && mat.isMeshPhysicalMaterial && !isUnderShelf(o)) {
+        set.add(o as GlassMesh);             // ← do not treat shelf as “outer glass”
+      }
+    };
+    if (Array.isArray(m)) m.forEach(grab); else if (m) grab(m);
+  });
+  outerGlass.current = [...set];
+}, [gltf.scene]);
 
 
 // ===== ACRYLIC: apply patterns to Glass_material =====
@@ -852,9 +1054,185 @@ useEffect(() => {
   });
 }, [gltf.scene, model, stage]);
 
+// Glass finishes
 
-  return <primitive object={gltf.scene} dispose={null} />;
-}
+
+useEffect(() => {
+  const outers = outerGlass.current;
+  if (!outers.length) return;
+
+  // Only drive base glass when acrylic is "clear"
+  if (acrylic !== 'clear') return;
+
+  outers.forEach((outer) => {
+    const m = outer.material as THREE.MeshPhysicalMaterial;
+
+    if (glassFinish === 'transparent') {
+      // baseline clear (match your tuneGlass vibe)
+      m.roughness = 0.02;
+      m.transmission = 1.0;
+      m.clearcoat = 0.5;
+      m.clearcoatRoughness = 0.06;
+      (m as any).envMapIntensity = 1.2;
+      m.needsUpdate = true;
+    } else {
+      // frosted look
+      applyFrostedOuter(outer as any);
+    }
+  });
+}, [glassFinish, acrylic, gltf.scene]);
+
+  // ---- S H E L F   L O G I C  (top-level effect; NOT nested) ----
+  const shelfMode = useSim(s => s.shelfMetalColor);
+  useEffect(() => {
+    const root = shelfRoot.current;
+    if (!root) return;
+
+    // Show / hide
+    if (shelfCorner === 0) {
+      root.visible = false;
+      return;
+    }
+    root.visible = true;
+
+    // Ensure a single child exists
+    if (root.children.length === 0) {
+      const shelfClone = shelfGltf.scene.clone(true);
+      shelfClone.name = 'CornerShelf';
+      root.add(shelfClone);
+
+      // Paint only mat__aluminum parts of the shelf with the current finish on spawn
+      if (lastAluminumSample.current) {
+        applyFinishToNode(shelfClone, lastAluminumSample.current, isMat__Aluminum);
+      }
+    }
+
+    // Position/orientation from preset
+    // Position/orientation from preset
+    const preset = getShelfPresetForModel(model);
+    const wantCorner2 = (shelfCorner === 2);
+    const rawPose = wantCorner2 ? (preset.corner2 ?? preset.corner1) : preset.corner1;
+
+    // Normalize (handles legacy tiltX → rotX + defaults)
+    const pose = {
+      rotX: (rawPose as any).rotX ?? (rawPose as any).tiltX ?? -Math.PI / 2,
+      rotY: (rawPose as any).rotY ?? 0,
+      rotZ: (rawPose as any).rotZ ?? 0,
+      ...rawPose
+    };
+
+    // Reset transform first
+    root.position.set(0, 0, 0);
+    root.rotation.set(0, 0, 0);
+    root.scale.set(1, 1, 1);
+
+    // Apply rotations in one go
+    root.rotation.set(pose.rotX, pose.rotY, pose.rotZ);
+
+    // Optional “invert” for corner 2
+    if (wantCorner2 && pose.flipOnCorner2) {
+      root.rotateY(Math.PI);
+      root.rotateZ(Math.PI);
+    }
+
+    // Stage 2: allow a different Z for Corner 1
+    const useZ = (stage === 2 && (pose as any).zStage2 !== undefined)
+      ? (pose as any).zStage2
+      : pose.pos[2];
+
+    root.position.set(pose.pos[0], pose.pos[1], useZ);
+
+    // Optional nudge for Corner 2
+    if (wantCorner2 && pose.corner2Offset) {
+      const [ox, oy, oz] = pose.corner2Offset;
+      root.position.add(new THREE.Vector3(ox, oy, oz));
+    }
+
+    const s = pose.scale ?? 1;
+    root.scale.set(s, s, s);
+  }, [model, stage, shelfCorner, shelfGltf.scene, shelfMode]);
+
+  useEffect(() => {
+    const mats: any[] = [];
+    const root = shelfRoot.current;
+    if (!root) { shelfHingeMatsRef.current = []; return; }
+
+    root.traverse(o => {
+      if (!(o as any).isMesh) return;
+      if (!isShelfHingeName(o.name)) return;                // only shelf_hinge*
+      const m: any = (o as any).material;
+      const push = (mm: any) => { if (isShelfFixMat(mm)) mats.push(mm); }; // only "alum"
+      Array.isArray(m) ? m.forEach(push) : push(m);
+    });
+
+  shelfHingeMatsRef.current = mats;
+}, [shelfGltf.scene, shelfCorner]);
+
+  /*Fixing Bar and Shelf Hinge colors*/
+
+// We store exact meshes + slots to change, and original materials to restore.
+const isFixBarAncestor = (obj: THREE.Object3D | null) => {
+  const re = /^(fix(ing)?[\s_-]*bar\b)/i; // "Fixing Bar", "FixingBar", "Fixing Bar 2", ...
+  while (obj) { if (re.test(obj.name ?? '')) return true; obj = obj.parent as any; }
+  return false;
+};
+// materials we’ll repaint in place
+const fixBarMatsRef = useRef<any[]>([]);
+
+// scan once per scene change
+useEffect(() => {
+  const mats: any[] = [];
+  gltf.scene.traverse(o => {
+    if (!(o as any).isMesh) return;
+    if (!isFixBarAncestor(o)) return;          // keep your ancestor test
+    const m: any = (o as any).material;
+    const pushIf = (mm: any) => { if (isShelfFixMat(mm)) mats.push(mm); };
+    Array.isArray(m) ? m.forEach(pushIf) : pushIf(m);
+  });
+  fixBarMatsRef.current = mats;
+}, [gltf.scene]);
+
+// repaint / restore based on mode or finish change
+const fixBarMode = useSim(s => s.fixBarColor); // 'standard' | 'finish'
+
+useEffect(() => {
+  const mats = fixBarMatsRef.current;
+  if (!mats.length) return;
+
+  const sample = lastAluminumSample.current;
+  if (fixBarMode === 'finish' && sample) {
+    mats.forEach(mm => {
+      if (!origByMat_FixBar.has(mm)) {
+        origByMat_FixBar.set(mm, (mm as THREE.Material).clone());
+      }
+      paintWithSample(sample, mm); // ← in-place copy of look
+    });
+  } else {
+    mats.forEach(mm => restoreFromSnapshot(mm, origByMat_FixBar.get(mm)));
+  }
+}, [fixBarMode, finish, gltf.scene]);
+
+
+  useEffect(() => {
+    const mats = shelfHingeMatsRef.current;
+    if (!mats.length) return;
+
+    const sample = lastAluminumSample.current;
+    if (shelfMode === 'finish' && sample) {
+      mats.forEach(mm => {
+        if (!origByMat_Shelf.has(mm)) {
+          origByMat_Shelf.set(mm, (mm as THREE.Material).clone()); // snapshot once
+        }
+        paintWithSample(sample, mm);                                // copy look now
+      });
+    } else {
+      // restore original materials on "Padrão"
+      mats.forEach(mm => restoreFromSnapshot(mm, origByMat_Shelf.get(mm)));
+    }
+  }, [shelfMode, finish, shelfGltf.scene, shelfCorner]);
+
+    return <primitive object={gltf.scene} dispose={null} />;
+  }
 
 
 // after:
@@ -915,13 +1293,16 @@ export default function Viewer() {
 const maxDistance = preset.shower.maxDistance ?? Math.max(plannedDist + 0.01, 1.2);
 
   // Allow configuring per-model if you want; otherwise keep your current values
- 
+  const setFixBarColor     = useSim(s => s.setFixBarColor);     // 'default' | 'finish'
+  const setShelfMetalColor = useSim(s => s.setShelfMetalColor); // 'default' | 'finish'
   useEffect(() => {
     // snap back to the model's overview when the model changes
     setMode('overview');
     window.dispatchEvent(new CustomEvent('go-to-cam-pose', {
       detail: { pos: preset.overview.pos, look: preset.overview.look, duration: 0.35 }
     }));
+    setFixBarColor('default');
+    setShelfMetalColor('default');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
   const { min, max } = React.useMemo(
@@ -985,15 +1366,15 @@ useEffect(() => {
             - shower: limited free movement */}
         <OrbitControls
           ref={controlsRef}
-          enabled={mode === 'shower' && !animating}
-          enablePan={false}
+          enabled={true} //mode === 'shower' && !animating
+          enablePan={true}
           // allow super close inspections
-          minDistance={mode === 'shower' ? minDistance : 0.01}
+          /*minDistance={mode === 'shower' ? minDistance : 0.01}
           maxDistance={mode === 'shower' ? maxDistance  : 50}
           minPolarAngle={THREE.MathUtils.degToRad(35)}
           maxPolarAngle={THREE.MathUtils.degToRad(110)}
           zoomSpeed={1.2}
-          rotateSpeed={0.95}
+          rotateSpeed={0.95}*/
         />
         <FixedCamera controlsRef={controlsRef} preset={preset} />
         <CameraSnap controlsRef={controlsRef} />

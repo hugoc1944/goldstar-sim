@@ -3,12 +3,17 @@ import type { FinishName } from '@/lib/finishes';
 
 type Acrylic = 'clear' | 'aguaviva';
 
+type MetalColorMode = 'default' | 'finish';
+type GlassFinish = 'transparent' | 'frosted';
+
 // e.g. "DiplomataGold_V3", "Sterling_V2", etc.
 // Keep this as a free string so you can add models without code changes.
 type ModelId = string;
 
 type Stage = 1 | 2;
 const DEFAULT_FINISH: FinishName = 'Cromado';
+
+type ShelfCorner = 0 | 1 | 2;
 
 type SilkCfg = {
   url: string;
@@ -55,11 +60,23 @@ type SimState = {
   finish: FinishName;
   setFinish: (f: FinishName) => void;
 
+  glassFinish: GlassFinish;
+  setGlassFinish: (v: GlassFinish) => void;
+
   acrylic: Acrylic;
   setAcrylic: (a: Acrylic) => void;
 
   silk?: SilkCfg;
   setSilk: (cfg: Partial<SilkCfg> & { url?: string }) => void;
+
+  shelfCorner: ShelfCorner;              // 0 by default (hidden)
+  setShelfCorner: (c: ShelfCorner) => void;
+
+  fixBarColor: MetalColorMode;                 // "Cor barra fixação"
+  setFixBarColor: (m: MetalColorMode) => void;
+
+  shelfMetalColor: MetalColorMode;             // "Cor prateleira" (shelf hinges)
+  setShelfMetalColor: (m: MetalColorMode) => void;
 };
 
 // --- NEW: defaults you set once per handle (edit these!)
@@ -95,6 +112,7 @@ export const useSim = create<SimState>((set, get) => ({
       silk: { ...DEFAULT_SILK },
       // misc
       animPlaying: false,
+      shelfCorner: 0,
     });
   },
   setStage: (stage) => set({ stage }), // switching stage keeps all customizations
@@ -147,6 +165,9 @@ export const useSim = create<SimState>((set, get) => ({
   finish: DEFAULT_FINISH,
   setFinish: (f) => set({ finish: f }),
 
+  glassFinish: 'transparent',
+  setGlassFinish: (v) => set({ glassFinish: v }),
+
   acrylic: 'clear',
   setAcrylic: (a) =>
     set((s) => {
@@ -161,4 +182,13 @@ export const useSim = create<SimState>((set, get) => ({
     if (next.url) set({ acrylic: 'clear' });
     set({ silk: next });
   },
+
+  shelfCorner: 0,
+  setShelfCorner: (c) => set({ shelfCorner: c }),
+
+  fixBarColor: 'default',
+  setFixBarColor: (m) => set({ fixBarColor: m }),
+
+  shelfMetalColor: 'default',
+  setShelfMetalColor: (m) => set({ shelfMetalColor: m }),
 }));
