@@ -1366,15 +1366,15 @@ useEffect(() => {
             - shower: limited free movement */}
         <OrbitControls
           ref={controlsRef}
-          enabled={true} //mode === 'shower' && !animating
+          enabled={mode === 'shower' && !animating} //mode === 'shower' && !animating
           enablePan={true}
           // allow super close inspections
-          /*minDistance={mode === 'shower' ? minDistance : 0.01}
+          minDistance={mode === 'shower' ? minDistance : 0.01}
           maxDistance={mode === 'shower' ? maxDistance  : 50}
           minPolarAngle={THREE.MathUtils.degToRad(35)}
           maxPolarAngle={THREE.MathUtils.degToRad(110)}
           zoomSpeed={1.2}
-          rotateSpeed={0.95}*/
+          rotateSpeed={0.95}
         />
         <FixedCamera controlsRef={controlsRef} preset={preset} />
         <CameraSnap controlsRef={controlsRef} />
