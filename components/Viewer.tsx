@@ -436,6 +436,15 @@ function Product() {
   const model = useSim((s) => s.model);  // e.g. "DiplomataGold_V5"
   const stage = useSim((s) => s.stage);  // 1 | 2
   const sceneFile = `/glb/SCENE_${stage}_${model}.glb`;
+  //Fix model change crash (dispose customizations)
+  function disposeSubtree(node: THREE.Object3D) {
+  node.traverse((n: any) => {
+    const m = n.material;
+    if (Array.isArray(m)) m.forEach(mm => mm?.dispose?.());
+    else m?.dispose?.();
+    n.geometry?.dispose?.();
+  });
+}
 
   const gltf = useGLTF(sceneFile);
   // Preload both stages for the *current* model (lightweight + snappy switching)
@@ -717,6 +726,7 @@ useEffect(() => {
     for (let i = root.children.length - 1; i >= 0; i--) {
       const c = root.children[i];
       if (norm(c.name).startsWith('handleswap')) {
+        disposeSubtree(c);           // free GPU resources
         root.remove(c);
         // NEW: ensure it’s no longer tracked
         currentSwapRoots.current.delete(c);
@@ -860,7 +870,9 @@ useEffect(() => {
   if (!outers.length) return;
   const removeOverlay = (outer: THREE.Mesh) => {
     const old = outer.getObjectByName('SilkOverlay') as THREE.Mesh | null;
-    if (old) old.parent?.remove(old);
+    if (old){ 
+      disposeSubtree(old);           // dispose overlay material & texture
+      old.parent?.remove(old);}
   };
 
   // if no silk → remove overlays and stop
@@ -1278,7 +1290,7 @@ useEffect(() => {
     }
   }, [shelfMode, finish, shelfGltf.scene, shelfCorner]);
 
-    return <primitive object={gltf.scene} dispose={null} />;
+    return <primitive object={gltf.scene} />;
   }
 
 
@@ -1399,13 +1411,21 @@ useEffect(() => {
         </button>
       )}
 
-      <Canvas className="absolute inset-0" dpr={[1.25, 2]} gl={{ antialias: true }}
+      <Canvas
+        className="absolute inset-0"
+        dpr={[1.25, 2]}
+        gl={{ antialias: true }}
         onCreated={({ gl }) => {
           gl.outputColorSpace = THREE.SRGBColorSpace;
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 1.0;
           // @ts-ignore
           gl.physicallyCorrectLights = true;
+
+          gl.domElement.addEventListener('webglcontextlost', (e) => {
+            e.preventDefault();
+            console.warn('WebGL context lost');
+          });
         }}
       >
         {/* Controls:
@@ -1413,15 +1433,15 @@ useEffect(() => {
             - shower: limited free movement */}
         <OrbitControls
           ref={controlsRef}
-          enabled={true} //mode === 'shower' && !animating
+          enabled={mode === 'shower' && !animating} //mode === 'shower' && !animating
           enablePan={true}
           // allow super close inspections
-          /*minDistance={mode === 'shower' ? minDistance : 0.01}
+          minDistance={mode === 'shower' ? minDistance : 0.01}
           maxDistance={mode === 'shower' ? maxDistance  : 50}
           minPolarAngle={THREE.MathUtils.degToRad(35)}
           maxPolarAngle={THREE.MathUtils.degToRad(110)}
           zoomSpeed={1.2}
-          rotateSpeed={0.95}*/
+          rotateSpeed={0.95}
         />
         <FixedCamera controlsRef={controlsRef} preset={preset} />
         <CameraSnap controlsRef={controlsRef} />
