@@ -21,6 +21,24 @@ THREE.Cache.enabled = true;
 
 type GlassMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>;
 
+// --- shared texture cache ---
+const _texLoader = new THREE.TextureLoader();
+const TEX_CACHE = new Map<string, THREE.Texture>();
+
+function getTexture(url: string, colorSpace: THREE.ColorSpace) {
+  const key = `${url}|${colorSpace}`;
+  const cached = TEX_CACHE.get(key);
+  if (cached) return Promise.resolve(cached);
+  return new Promise<THREE.Texture>((res, rej) => {
+    _texLoader.load(
+      url,
+      (t) => { t.colorSpace = colorSpace; TEX_CACHE.set(key, t); res(t); },
+      undefined,
+      rej
+    );
+  });
+}
+
 function formatVec(v: THREE.Vector3) {
   return `[${v.x.toFixed(3)}, ${v.y.toFixed(3)}, ${v.z.toFixed(3)}]`;
 }
@@ -156,25 +174,11 @@ async function applyFinishToMats(
   aniso: number
 ) {
   const basePath = `/finishes/${name}/${name}`;
-  const loader = new THREE.TextureLoader();
-  const load = (url: string) =>
-    new Promise<THREE.Texture | null>(res => {
-      loader.load(
-        url,
-        t => {
-          const isBase = url.toLowerCase().includes('basecolor');
-          t.colorSpace = isBase ? THREE.SRGBColorSpace : THREE.LinearSRGBColorSpace;
-          t.wrapS = t.wrapT = THREE.RepeatWrapping;
-          t.anisotropy = aniso;
-          t.minFilter = THREE.LinearMipmapLinearFilter;
-          t.magFilter = THREE.LinearFilter;
-          t.generateMipmaps = true;
-          res(t);
-        },
-        undefined,
-        () => res(null)
-      );
-    });
+  const load = (url: string) => {
+    const isBase = url.toLowerCase().includes('basecolor');
+    const cs = isBase ? THREE.SRGBColorSpace : THREE.LinearSRGBColorSpace;
+    return getTexture(url, cs).catch(() => null);
+  };
 
   const [map, normalMap, roughnessMap] = await Promise.all([
     load(`${basePath}_BaseColor.png`),
@@ -438,13 +442,13 @@ function Product() {
   const sceneFile = `/glb/SCENE_${stage}_${model}.glb`;
   //Fix model change crash (dispose customizations)
   function disposeSubtree(node: THREE.Object3D) {
-  node.traverse((n: any) => {
-    const m = n.material;
-    if (Array.isArray(m)) m.forEach(mm => mm?.dispose?.());
-    else m?.dispose?.();
-    n.geometry?.dispose?.();
-  });
-}
+    node.traverse((n: any) => {
+      const m = n.material;
+      if (Array.isArray(m)) m.forEach(mm => mm?.dispose?.());
+      else m?.dispose?.();
+      n.geometry?.dispose?.();
+    });
+  }
 
   const gltf = useGLTF(sceneFile);
   // Preload both stages for the *current* model (lightweight + snappy switching)
@@ -460,11 +464,12 @@ function Product() {
 
   const finishJobId = useRef(0); //For hinge color
 
-    useEffect(() => {
-    // make sure our group is attached to the current scene root
+  useEffect(() => {
     gltf.scene.add(shelfRoot.current);
     return () => {
-      // detach on unmount / when scene changes
+      // on unmount / model change: dispose the shelf content and detach
+      shelfRoot.current.children.forEach(ch => disposeSubtree(ch));
+      shelfRoot.current.clear();
       gltf.scene.remove(shelfRoot.current);
     };
   }, [gltf.scene]);
@@ -885,8 +890,8 @@ useEffect(() => {
     return; // the effect will re-run with transparent selected
   }
 
-  new THREE.TextureLoader().load(silk.url, (tex) => {
-    tex.colorSpace = THREE.SRGBColorSpace;
+    getTexture(silk.url, THREE.SRGBColorSpace).then((tex) => {
+    if (!tex) return;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
 
     const inkMat = new THREE.MeshStandardMaterial({
@@ -957,24 +962,16 @@ useEffect(() => {
   if (!outers.length) return;
 
   const loader = new THREE.TextureLoader();
-  const loadLinear = (url: string) =>
-    new Promise<THREE.Texture>((res, rej) => {
-      loader.load(
-        url,
-        (t) => {
-          // normals/roughness/thickness are linear
-          t.colorSpace = THREE.LinearSRGBColorSpace;
-          t.wrapS = t.wrapT = THREE.RepeatWrapping;
-          t.repeat.set(3, 3);                     // make the pattern obvious; tweak
-          t.minFilter = THREE.LinearMipmapLinearFilter;
-          t.magFilter = THREE.LinearFilter;
-          t.generateMipmaps = true;
-          res(t);
-        },
-        undefined,
-        rej
-      );
-    });
+const loadLinear = (url: string) =>
+  getTexture(url, THREE.LinearSRGBColorSpace).then((t) => {
+    if (!t) return t;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(3, 3);
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.generateMipmaps = true;
+    return t;
+  });
 // CLEAR branch
   if (acrylic === 'clear') {
     outers.forEach(outer => {
@@ -1112,7 +1109,7 @@ useEffect(() => {
       outerGlass.current.forEach((outer) => {
       // remove overlay if present
       const overlay = outer.getObjectByName('SilkOverlay') as THREE.Mesh | null;
-      if (overlay) overlay.parent?.remove(overlay);
+      if (overlay) { disposeSubtree(overlay); overlay.parent?.remove(overlay); }
 
       // ensure frosted look is actually applied
       // (use whichever you’re using: applyFrostedOuter or applyFrostedTransmission)
@@ -1413,7 +1410,7 @@ useEffect(() => {
 
       <Canvas
         className="absolute inset-0"
-        dpr={[1.25, 2]}
+        dpr={[1, 1.5]}
         gl={{ antialias: true }}
         onCreated={({ gl }) => {
           gl.outputColorSpace = THREE.SRGBColorSpace;
@@ -1473,7 +1470,7 @@ useEffect(() => {
         <Environment files="/hdris/bathroom_4k.hdr" background blur={0.35} />
         <Product />
 
-        <EffectComposer multisampling={4} enableNormalPass={false}>
+        <EffectComposer enableNormalPass={false}>
           <SMAA preset={SMAAPreset.HIGH} />
         </EffectComposer>
       </Canvas>
