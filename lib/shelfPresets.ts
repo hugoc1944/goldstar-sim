@@ -1,3 +1,5 @@
+import { MATCHED_PATH_HEADER } from "next/dist/lib/constants";
+
 export type Vec3 = [number, number, number];
 
 export type ShelfCornerPose = {
@@ -24,17 +26,140 @@ export type ShelfPreset = {
 const CAM_POS: [number, number, number] = [0.725, 1.530, 0.662];
 const CAM_LOOK: [number, number, number] = [0.717, 1.271, -0.510];*/
 const PRESETS: Record<string, ShelfPreset> = {
+  DiplomataGold_V1: {
+    allowCorner2: false,
+    corner1: { pos: [1.455, 1.230, -2.415], zStage2: -2.135, rotY: 0, scale: 1.0 },
+  },
+  DiplomataGold_V2: {
+    allowCorner2: false,
+    corner1: { pos: [1.455, 1.230, -2.415], zStage2: -2.135, rotY: 0, scale: 1.0 },
+  },
   DiplomataGold_V3: {
     allowCorner2: true,
     corner1: { pos: [1.455, 1.230, -2.415], zStage2: -2.135, rotY: 0, scale: 1.0 },
     corner2: { pos: [1.455, 1.230, -1.618], rotY: 0, scale: 1.0, flipOnCorner2: true, },
+  },
+  DiplomataGold_V4: {
+    allowCorner2: true,
+    corner1: { pos: [0.026, 1.230, -2.415], zStage2: -2.135, rotY: Math.PI, scale: 1.0 },
+    corner2: { pos: [0.026, 1.230, -1.618], rotY: Math.PI, scale: 1.0, flipOnCorner2: true, },
+  },
+  DiplomataGold_V5: {
+    allowCorner2: true,
+    corner1: { pos: [1.455, 1.230, -2.415], zStage2: -2.135, rotY: 0, scale: 1.0 },
+    corner2: { pos: [1.455, 1.230, -1.618], rotY: 0, scale: 1.0, flipOnCorner2: true, },
+  },
+  DiplomataGold_V6: {
+    allowCorner2: true,
+    corner1: { pos: [1.54, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+    corner2: { pos: [1.54, 1.06, -0.69], rotY: 0, scale: 1.0, flipOnCorner2: true, },
+  },
+  DiplomataGold_V7: {
+    allowCorner2: true,
+    corner1: { pos: [1.55, 1.06, -1.23], zStage2:-1.2, rotY: 0, scale: 1.0},
+    corner2: { pos: [0.27, 1.06, -1.23], zStage2:-1.2, rotZ: 1*Math.PI, scale: 1.0, flipOnCorner2: true, },
+  },
+  DiplomataGold_V8: {
+    allowCorner2: true,
+    corner1: { pos: [1.55, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+    corner2: { pos: [0.62, 1.06, -1.22], zStage2:-1.2, rotY: 1*Math.PI, rotX: 0.5*Math.PI, scale: 1.0, flipOnCorner2: true, },
+  },
+  DiplomataGold_V9: {
+    allowCorner2: true,
+    corner1: { pos: [1.55, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+    corner2: { pos: [0.62, 1.06, -1.22], zStage2:-1.2, rotY: 1*Math.PI, rotX: 0.5*Math.PI, scale: 1.0, flipOnCorner2: true, },
+  },
+  DiplomataGold_V10: {
+    allowCorner2: false,
+    corner1: { pos: [1.54, 1.06, -0.69], rotZ: Math.PI, rotY: Math.PI, scale: 1.0},
   },
   Sterling_V1: {
     allowCorner2: true,
     corner1: { pos: [1.55, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
     corner2: { pos: [0.67, 1.06, -1.22], zStage2:-1.2, rotY: 1*Math.PI, rotX: 0.5*Math.PI, scale: 1.0, flipOnCorner2: true, },
   },
-
+  Sterling_V2: {
+    allowCorner2: true,
+    corner1: { pos: [0.159, 1.130, -2.425], zStage2: -2.135, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [0.159, 1.130, -1.599], rotY: 1*Math.PI, scale: 1.0, flipOnCorner2: true, },
+  },
+  Sterling_V3: {
+    allowCorner2: true,
+    corner1: { pos: [1.455, 1.230, -2.415], zStage2: -2.135, rotY: 0, scale: 1.0 },
+    corner2: { pos: [1.455, 1.230, -1.618], rotY: 0, scale: 1.0, flipOnCorner2: true, },
+  },
+  Sterling_V4: {
+    allowCorner2: true,
+    corner1: { pos: [0.361, 1.250, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [0.361, 1.250, -0.660], rotY: 1*Math.PI, scale: 1.0, flipOnCorner2: true, },
+  },
+  //Europa
+  Europa_V1: {
+    allowCorner2: true,
+    corner1: { pos: [1.455, 1.06, -2.14], zStage2: -2.135, rotY: 0, scale: 1.0 },
+    corner2: { pos: [0.176, 1.06, -2.14], zStage2: -2.135, rotY: 1*Math.PI, scale: 1.0 },
+  },
+  Europa_V2: {
+    allowCorner2: true,
+    corner1: { pos: [0.23, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [1.55, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+  },
+    Europa_V3: {
+    allowCorner2: true,
+    corner1: { pos: [0.16, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [1.45, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+  },
+    Europa_V4: {
+    allowCorner2: true,
+    corner1: { pos: [0.120, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [1.45, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+  },
+  //Strong
+  Strong_V1: {
+    allowCorner2: true,
+    corner1: { pos: [1.455, 1.06, -2.14], zStage2: -2.135, rotY: 0, scale: 1.0 },
+    corner2: { pos: [0.176, 1.06, -2.14], zStage2: -2.135, rotY: 1*Math.PI, scale: 1.0 },
+  },
+  Strong_V2: {
+    allowCorner2: true,
+    corner1: { pos: [0.23, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [1.55, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+  },
+  Strong_V3: {
+    allowCorner2: true,
+    corner1: { pos: [0.16, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [1.45, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+  },
+  Strong_V4: {
+    allowCorner2: true,
+    corner1: { pos: [0.120, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [1.45, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+  },
+  //Painel Fixo
+  PainelFixo_V1: {
+    allowCorner2: false,
+    corner1: { pos: [1.45, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+  },
+  //Painel
+  Painel_V1: {
+    allowCorner2: true,
+    corner1: { pos: [1.54, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+    corner2: { pos: [1.54, 1.06, -0.69], rotY: 0, scale: 1.0, flipOnCorner2: true,},
+  },
+  Painel_V2: {
+    allowCorner2: true,
+    corner1: { pos: [1.54, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+    corner2: { pos: [1.54, 1.06, -0.69], rotY: 0, scale: 1.0, flipOnCorner2: true,},
+  },
+  Painel_V3: {
+    allowCorner2: true,
+    corner1: { pos: [0.16, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner2: { pos: [1.45, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+  },
+  Painel_V4: {
+    allowCorner2: false,
+    corner1: { pos: [0.16, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+  },
   // …add the other models here…
 };
 

@@ -1,8 +1,11 @@
 'use client';
 import { useSim } from '@/state/sim';
+
 import { FINISHES } from '@/lib/finishes';
 import { getShelfPresetForModel } from '@/lib/shelfPresets';
 import type { FinishName } from '@/lib/finishes';
+import { getRulesForVariant } from '@/lib/modelCatalog';
+import { useEffect } from 'react';
 
 export default function Panels() {
   const animPlaying = useSim(s => s.animPlaying);
@@ -20,20 +23,59 @@ export default function Panels() {
   const setShelfMetalColor = useSim(s => s.setShelfMetalColor);
   const fixBarColor = useSim(s => s.fixBarColor);      // 'default' | 'finish'
   const setFixBarColor = useSim(s => s.setFixBarColor);
+  const hasFixingBar = useSim(s => s.hasFixingBar);
   
   const model = useSim(s => s.model);
-  const stage = useSim(s => s.stage);
-  const setModel = useSim(s => s.setModel);
-  const setStage = useSim(s => s.setStage);
+  const rules = getRulesForVariant(model);
 
-  // helper to split finishes
-  const METALLICS: Set<FinishName> = new Set(['Cromado', 'Anodizado']);
-  const lacados   = FINISHES.filter(n => !METALLICS.has(n));
-  const metalicos = Array.from(METALLICS).filter(n => FINISHES.includes(n as any));
+  // Split finishes, but remove any forbidden ones first
+  const METALLICS = new Set(['Cromado', 'Anodizado']);
+  const removed = new Set(rules.removeFinishes ?? []);
+  const allowedFinishes = FINISHES.filter(n => !removed.has(n));
+
+  const lacados   = allowedFinishes.filter(n => !METALLICS.has(n));
+  const metalicos = allowedFinishes.filter(n => METALLICS.has(n as any));
+  // If "Cromado" was removed, or the current finish isn't allowed, pick a safe default
+  useEffect(() => {
+    const removed = new Set(rules.removeFinishes ?? []);
+    const cromadoHidden = removed.has('Cromado');
+
+    // If the current finish is no longer allowed, or is explicitly "Cromado" and it’s hidden,
+    // switch to "Branco" when possible, otherwise to the first allowed finish.
+    const allowed = new Set(allowedFinishes);
+    const needsChange =
+      !allowed.has(finish as any) ||
+      (cromadoHidden && finish === 'Cromado');
+
+    if (needsChange) {
+      const fallback =
+        (allowed.has('Branco' as any) ? 'Branco' : allowedFinishes[0]) as FinishName | undefined;
+
+      if (fallback) setFinish(fallback);
+    }
+    // run on model / rules change or when the user’s current finish becomes invalid
+  }, [/* deps: */ model, rules, finish, allowedFinishes, setFinish]);
+    const showHandles = !(rules.hideHandles ?? false);
+    const handleKey = useSim(s => s.handleKey);
+    const setHandleLocal = useSim(s => s.setHandle);
+    useEffect(() => {
+    if (!showHandles) {
+      // empty string / undefined -> your Viewer restores the original geometry
+      setHandle('');
+    }
+  }, [showHandles, setHandle]);
+  // Glass visibility (transparent is always allowed)
+  const allowGlass = new Set(rules.allowGlass ?? ['transparent', 'frosted']);
+  const showFrosted    = allowGlass.has('frosted');
+  const showMonochrome = allowGlass.has('monochrome'); // future-proof
+
+  // Acrílicos
+  const showAcrylics = !(rules.hideAcrylics ?? false);
 
   const shelfCorner = useSim(s => s.shelfCorner);
   const setShelfCorner = useSim(s => s.setShelfCorner);
   const shelfPreset = getShelfPresetForModel(model);
+  
   return (
     <div className="space-y-6 text-sm">
        
@@ -64,35 +106,26 @@ export default function Panels() {
         </button>
       </section>
 
-      <section>
-        <h3 className="font-semibold mb-2">Puxadores</h3>
+      {showHandles && (
+        <section>
+          <h3 className="font-semibold mb-2">Puxadores</h3>
 
-        {/** state */}
-        {(() => {
-          const handleKey = useSim(s => s.handleKey);           // e.g. "Handle_2" or undefined for default
-          const setHandle = useSim(s => s.setHandle);
-
-          // Helper: which button is active?
-          const isActive = (k?: string) => (k ? handleKey === k : !handleKey);
-
-          // List your buttons once; `key` is just the basename without .glb
-          const HANDLES = [
-            { label: 'Puxador 1', key: 'Handle_1', url: '/handles/Handle_1.glb' },
-            { label: 'Puxador 2', key: 'Handle_2', url: '/handles/Handle_2.glb' },
-            { label: 'Puxador 3', key: 'Handle_3', url: '/handles/Handle_3.glb' },
-            { label: 'Puxador 4', key: undefined, url: '' }, // default/original
-            { label: 'Puxador 5', key: 'Handle_5', url: '/handles/Handle_5.glb' },
-            { label: 'Puxador 6', key: 'Handle_6', url: '/handles/Handle_6.glb' },
-            { label: 'Puxador 7', key: 'Handle_7', url: '/handles/Handle_7.glb' },
-            // { label: 'Puxador 8', key: 'Handle_8', url: '/handles/Handle_8.glb' },
-          ];
-
-          return (
-            <div className="grid grid-cols-2 gap-2 max-h-56 overflow-auto pr-1">
-              {HANDLES.map(h => (
+          {/* no IIFE here; just use the values we hooked above */}
+          <div className="grid grid-cols-2 gap-2 max-h-56 overflow-auto pr-1">
+            {[
+              { label: 'Puxador 1', key: 'Handle_1', url: '/handles/Handle_1.glb' },
+              { label: 'Puxador 2', key: 'Handle_2', url: '/handles/Handle_2.glb' },
+              { label: 'Puxador 3', key: 'Handle_3', url: '/handles/Handle_3.glb' },
+              { label: 'Puxador 4', key: undefined,   url: '' },
+              { label: 'Puxador 5', key: 'Handle_5', url: '/handles/Handle_5.glb' },
+              { label: 'Puxador 6', key: 'Handle_6', url: '/handles/Handle_6.glb' },
+              { label: 'Puxador 7', key: 'Handle_7', url: '/handles/Handle_7.glb' },
+            ].map(h => {
+              const isActive = (k?: string) => (k ? handleKey === k : !handleKey);
+              return (
                 <button
                   key={h.key ?? 'default'}
-                  onClick={() => setHandle(h.url)}
+                  onClick={() => setHandleLocal(h.url)}
                   className={`px-3 py-1 rounded border text-left ${
                     isActive(h.key) ? 'bg-black text-white' : 'hover:bg-black/5'
                   }`}
@@ -101,11 +134,11 @@ export default function Panels() {
                 >
                   {h.label}
                 </button>
-              ))}
-            </div>
-          );
-        })()}
-      </section>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section>
         <h3 className="font-semibold mb-2">Acabamentos</h3>
@@ -143,23 +176,25 @@ export default function Panels() {
             </div>
           </div>
           {/* Cor barra fixação — moved here */}
-          <div>
-            <div className="text-xs uppercase text-black/60 mb-1">Barra de fixação</div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setFixBarColor('default')}
-                className={`px-3 py-1 rounded border ${fixBarColor==='default' ? 'bg-black text-white' : 'hover:bg-black/5'}`}
-              >
-                Padrão
-              </button>
-              <button
-                onClick={() => setFixBarColor('finish')}
-                className={`px-3 py-1 rounded border ${fixBarColor==='finish' ? 'bg-black text-white' : 'hover:bg-black/5'}`}
-              >
-                Cor do acabamento
-              </button>
+           {hasFixingBar && (
+            <div>
+              <div className="text-xs uppercase text-black/60 mb-1">Barra de fixação</div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setFixBarColor('default')}
+                  className={`px-3 py-1 rounded border ${fixBarColor==='default' ? 'bg-black text-white' : 'hover:bg-black/5'}`}
+                >
+                  Padrão
+                </button>
+                <button
+                  onClick={() => setFixBarColor('finish')}
+                  className={`px-3 py-1 rounded border ${fixBarColor==='finish' ? 'bg-black text-white' : 'hover:bg-black/5'}`}
+                >
+                  Cor do acabamento
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </section>
 
@@ -216,37 +251,51 @@ export default function Panels() {
               Transparente
             </button>
 
-            <button
-              onClick={() => { setAcrylic('clear'); setGlassFinish('frosted'); }}  // ← add setAcrylic('clear')
-              className={`px-3 py-1 rounded border ${
-                glassFinish === 'frosted' ? 'bg-black text-white' : 'hover:bg-black/5'
-              }`}
-            >
-              Fosco
-            </button>
+            {showFrosted && (
+              <button
+                onClick={() => { setAcrylic('clear'); setSilk({ url: '' }); setGlassFinish('frosted'); }}
+                className={`px-3 py-1 rounded border ${
+                  glassFinish === 'frosted' ? 'bg-black text-white' : 'hover:bg-black/5'
+                }`}
+              >
+                Fosco
+              </button>
+            )}
+            {showMonochrome && (
+              <button
+                onClick={() => { setAcrylic('clear'); /* setGlassFinish('monochrome') */ }}
+                className="px-3 py-1 rounded border hover:bg-black/5"
+              >
+                Monocromático
+              </button>
+            )}
           </div>
 
           {/* Subsection: Acrílicos */}
-          <div className="text-xs uppercase text-black/60 mb-1">Acrílicos</div>
-          <div className="flex gap-2 flex-wrap mb-3">
-            <button
-              onClick={() => { setAcrylic('clear'); setGlassFinish('transparent'); }}
-              className={`px-3 py-1 rounded border ${
-                acrylic === 'clear' ? 'bg-black text-white' : 'hover:bg-black/5'
-              }`}
-            >
-              Nenhum
-            </button>
+          {showAcrylics && (
+            <>
+              <div className="text-xs uppercase text-black/60 mb-1">Acrílicos</div>
+              <div className="flex gap-2 flex-wrap mb-3">
+                <button
+                  onClick={() => { setAcrylic('clear'); setGlassFinish('transparent'); }}
+                  className={`px-3 py-1 rounded border ${
+                    acrylic === 'clear' ? 'bg-black text-white' : 'hover:bg-black/5'
+                  }`}
+                >
+                  Nenhum
+                </button>
 
-            <button
-              onClick={() => { setAcrylic('aguaviva'); setGlassFinish('transparent'); }}
-              className={`px-3 py-1 rounded border ${
-                acrylic === 'aguaviva' ? 'bg-black text-white' : 'hover:bg-black/5'
-              }`}
-            >
-              Água Viva
-            </button>
-          </div>
+                <button
+                  onClick={() => { setAcrylic('aguaviva'); setGlassFinish('transparent'); }}
+                  className={`px-3 py-1 rounded border ${
+                    acrylic === 'aguaviva' ? 'bg-black text-white' : 'hover:bg-black/5'
+                  }`}
+                >
+                  Água Viva
+                </button>
+              </div>
+            </>
+          )}
 
           {/* Subsection: Serigrafias */}
           <div className="text-xs uppercase text-black/60 mb-1">Serigrafias</div>
@@ -267,7 +316,9 @@ export default function Panels() {
 
                 {/* SER001 */}
                 <button
-                  onClick={() => setSilk({ url: '/silkscreens/SER001_silkscreen.png' })}
+                  onClick={() => {
+                    setGlassFinish('transparent');
+                    setSilk({ url: '/silkscreens/SER001_silkscreen.png' })}}
                   className={`px-3 py-1 rounded border ${
                     silkUrl === '/silkscreens/SER001_silkscreen.png'
                       ? 'bg-black text-white'

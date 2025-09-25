@@ -382,8 +382,13 @@ const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, '');
 
 // matches the hinge nodes and the new material name
 const isShelfHingeName  = (name: string) => norm(name).startsWith('shelf_hinge');
-const isShelfFixMat     = (m: any) => typeof m?.name === 'string' && norm(m.name) === 'alum';
-
+const isShelfFixMat = (m: any) => {
+  const n = (m?.name ?? '').toLowerCase().trim();
+  // normalize accents and spaces
+  const nn = n.normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/\s+/g, '');
+  // starts with "alum" is enough (alum, aluminum, aluminio, alum.001, etc.)
+  return nn.startsWith('alum');
+};
 // keep a copy of originals so "Padrão" restores correctly
 const origByMat_FixBar  = new WeakMap<THREE.Material, THREE.Material>();
 const origByMat_Shelf   = new WeakMap<THREE.Material, THREE.Material>();
@@ -567,6 +572,7 @@ function Product() {
     outer.needsUpdate = true;
   };
   const glassFinish = useSim(s => s.glassFinish);
+  const setGlassFinish = useSim(s => s.setGlassFinish);
   type GlassMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>;
 
   // Sharp aluminum profile fixing
@@ -585,6 +591,9 @@ function Product() {
 
   useFrame((_, dt) => { if (animPlaying) mixer.update(dt); });
 
+const isPanelGlassMat = (m: any) =>
+  typeof m?.name === 'string' && norm(m.name).startsWith('glass_material');
+
   // ===== ONE-TIME MATERIAL TUNING =====
   useEffect(() => {
     gltf.scene.traverse((obj) => {
@@ -592,13 +601,14 @@ function Product() {
       const mat = mesh.material as any;
       if (!mat) return;
 
-      if (isGlass(mat) && mat.isMeshPhysicalMaterial) {
-        if (isUnderShelf(mesh)) return;
-        tuneGlass(mat);
-        mat.side = THREE.FrontSide; // base glass, acrylics live here
-      } else if (isAluminum(mat) && mat.isMeshStandardMaterial) {
-        tuneAluminum(mat);
-      }
+      // only tune the shower panes, not every “glass*”
+    if (mat.isMeshPhysicalMaterial && isPanelGlassMat(mat)) {
+      if (isUnderShelf(mesh)) return;
+      tuneGlass(mat);
+      mat.side = THREE.FrontSide;
+    } else if (isAluminum(mat) && mat.isMeshStandardMaterial) {
+      tuneAluminum(mat);
+    }
     });
   }, [gltf.scene]);
 
@@ -681,6 +691,7 @@ function copyFinishFromSample(sample: THREE.MeshStandardMaterial, targets: THREE
 // ===== HANDLE SWAP (preserve animated node "Handle") =====
 const handleUrl = useSim(s => s.handleUrl);
 const handleDepth = useSim(s => s.handleDepth); // you already have this in state
+const hasFlipToken = (s: string) => /\bflip\b/i.test(s); // matches "...flip", "_flip", ".flip", etc.
 
 // keep originals per mesh (material + drawRange)
 const originalMatByMesh = useRef(new WeakMap<THREE.Mesh, THREE.Material|THREE.Material[]>());
@@ -793,36 +804,41 @@ useEffect(() => {
         const swap = src.scene.clone(true);
         swap.name = 'HandleSwapRoot';
         
-        const isGrabHandle = /Handle_(5|6|7)(?:\.glb)?$/i.test(handleUrl ?? '');
-        const DOT_EXTRA = 0.035; // <- tune this
-        
-        // Invert for ANY "Handle*" that is NOT exactly "Handle"
-        const raw = (r.name || '').trim().toLowerCase();
-        const isHandle = raw.startsWith('handle');
-        const isExactHandle = raw === 'handle';
-        const invert = isHandle && !isExactHandle;
+        // --- token-based flip/offset ---------------------------------------------
+        const rawLower = (r.name || '').trim().toLowerCase();
 
-        // Use a positive magnitude so slider sign doesn't matter
-        const base = handleDepth;
+        // Only long grab handles (5–7) need flipping logic.
+        // If you want it for all, you can drop the isGrabHandle guard.
+        const isGrabHandle = /handle_(5|6|7)(?:\.glb)?$/i.test(handleUrl ?? '');
 
-        // Reset local transform (no accumulation) then offset along local +Y
+        // Flip tokens: "_flip", "_flipx", "_flipz"
+        const hasFlip = /(^|[^a-z])flip([^a-z]|$)/i.test(rawLower);
+        const flipX   = /(^|[^a-z])flipx([^a-z]|$)/i.test(rawLower);
+        const flipZ   = /(^|[^a-z])flipz([^a-z]|$)/i.test(rawLower);
+
+        const flipAxis: 'x' | 'z' | null = isGrabHandle
+          ? (flipX ? 'x' : (flipZ || hasFlip ? 'z' : null))
+          : null;
+
+        // Optional extra standoff in mm via "_dNN" (e.g. _d6)
+        const depthTok = rawLower.match(/(^|[^a-z])d(\d+(?:\.\d+)?)([^a-z]|$)/i);
+        const extraDepthMM = depthTok ? parseFloat(depthTok[2]) : 0;
+
+        // Reset transform
         swap.position.set(0, 0, 0);
         swap.rotation.set(0, 0, 0);
         swap.scale.set(1, 1, 1);
 
-        // If the host is NOT exactly "Handle" (i.e. "Handle.001", "Handle 2", ...)
-        // flip the child's local +Y so a positive depth still moves outward.
-        const isExact = raw === 'handle';
-        if (!isExact && isGrabHandle) {
-          // flip Y by 180° (rotate around Z; X also works if your part looks better)
-          swap.rotateZ(Math.PI);
-        }
+        // Apply flip when requested
+        if (flipAxis === 'x') swap.rotateX(Math.PI);
+        if (flipAxis === 'z') swap.rotateZ(Math.PI);
 
-        const extra = (!isExact && isGrabHandle) ? DOT_EXTRA : 0;
-        const d = base + extra;
-        // now apply the SAME outward depth for both sides
+        // Single outward offset (no double-translate)
+        const DOT_EXTRA = 0.04; // small stand-off for grab handles when flipped
+        const base = handleDepth;
+        const extraMeters = (extraDepthMM / 1000) + (flipAxis ? DOT_EXTRA : 0);
+        const d = base + extraMeters;
         if (d) swap.translateY(d);
-
         // attach and paint
         r.add(swap);
         currentSwapRoots.current.add(swap);
@@ -851,6 +867,10 @@ useEffect(() => {
   if (!silk?.url) {
     outers.forEach(removeOverlay);
     return;
+  }
+  if (silk?.url && glassFinish !== 'transparent') {
+    setGlassFinish('transparent');
+    return; // the effect will re-run with transparent selected
   }
 
   new THREE.TextureLoader().load(silk.url, (tex) => {
@@ -897,7 +917,7 @@ useEffect(() => {
   gltf.scene.traverse((o) => {
     const m: any = (o as any).material;
     const grab = (mat: any) => {
-      if (isGlass(mat) && mat.isMeshPhysicalMaterial && !isUnderShelf(o)) {
+      if (isGlass(mat) && mat.isMeshPhysicalMaterial && isPanelGlassMat(mat) && !isUnderShelf(o)) {
         set.add(o as GlassMesh);             // ← do not treat shelf as “outer glass”
       }
     };
@@ -1077,7 +1097,16 @@ useEffect(() => {
       m.needsUpdate = true;
     } else {
       // frosted look
+      outerGlass.current.forEach((outer) => {
+      // remove overlay if present
+      const overlay = outer.getObjectByName('SilkOverlay') as THREE.Mesh | null;
+      if (overlay) overlay.parent?.remove(overlay);
+
+      // ensure frosted look is actually applied
+      // (use whichever you’re using: applyFrostedOuter or applyFrostedTransmission)
       applyFrostedOuter(outer as any);
+    });
+      
     }
   });
 }, [glassFinish, acrylic, gltf.scene]);
@@ -1172,26 +1201,44 @@ useEffect(() => {
 
 // We store exact meshes + slots to change, and original materials to restore.
 const isFixBarAncestor = (obj: THREE.Object3D | null) => {
-  const re = /^(fix(ing)?[\s_-]*bar\b)/i; // "Fixing Bar", "FixingBar", "Fixing Bar 2", ...
-  while (obj) { if (re.test(obj.name ?? '')) return true; obj = obj.parent as any; }
+  const re = /\b(fix(ing)?[\s_-]*bar|fixbar|barra\s*fixa|barra\s*de\s*fixa[cç][aã]o)\b/i;
+  while (obj) {
+    if (re.test(obj.name ?? '')) return true;
+    obj = obj.parent as any;
+  }
   return false;
 };
 // materials we’ll repaint in place
 const fixBarMatsRef = useRef<any[]>([]);
-
+const setHasFixingBar = useSim(s => s.setHasFixingBar);
+const setFixBarColor  = useSim(s => s.setFixBarColor);
 // scan once per scene change
 useEffect(() => {
+  // clear previous cache whenever the scene object changes
+  fixBarMatsRef.current = [];
+
   const mats: any[] = [];
+  const looksLikeBar = (name: string) =>
+    /\b(bar|barra|fixbar|fix[-_\s]*bar|barra\s*fixa|barra\s*de\s*fixa[cç][aã]o)\b/i.test(name);
+
   gltf.scene.traverse(o => {
     if (!(o as any).isMesh) return;
-    if (!isFixBarAncestor(o)) return;          // keep your ancestor test
+
+    const ok = isFixBarAncestor(o) || looksLikeBar(o.name ?? '');
+    if (!ok) return;
+
     const m: any = (o as any).material;
     const pushIf = (mm: any) => { if (isShelfFixMat(mm)) mats.push(mm); };
     Array.isArray(m) ? m.forEach(pushIf) : pushIf(m);
   });
-  fixBarMatsRef.current = mats;
-}, [gltf.scene]);
 
+  fixBarMatsRef.current = mats;
+  const has = mats.length > 0;
+  setHasFixingBar(has);
+  if (!has) setFixBarColor('default');
+
+  // no explicit cleanup needed; next run clears the ref above
+}, [gltf.scene, setHasFixingBar, setFixBarColor]);
 // repaint / restore based on mode or finish change
 const fixBarMode = useSim(s => s.fixBarColor); // 'standard' | 'finish'
 
@@ -1366,15 +1413,15 @@ useEffect(() => {
             - shower: limited free movement */}
         <OrbitControls
           ref={controlsRef}
-          enabled={mode === 'shower' && !animating} //mode === 'shower' && !animating
+          enabled={true} //mode === 'shower' && !animating
           enablePan={true}
           // allow super close inspections
-          minDistance={mode === 'shower' ? minDistance : 0.01}
+          /*minDistance={mode === 'shower' ? minDistance : 0.01}
           maxDistance={mode === 'shower' ? maxDistance  : 50}
           minPolarAngle={THREE.MathUtils.degToRad(35)}
           maxPolarAngle={THREE.MathUtils.degToRad(110)}
           zoomSpeed={1.2}
-          rotateSpeed={0.95}
+          rotateSpeed={0.95}*/
         />
         <FixedCamera controlsRef={controlsRef} preset={preset} />
         <CameraSnap controlsRef={controlsRef} />

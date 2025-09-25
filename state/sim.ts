@@ -72,6 +72,9 @@ type SimState = {
   shelfCorner: ShelfCorner;              // 0 by default (hidden)
   setShelfCorner: (c: ShelfCorner) => void;
 
+  hasFixingBar: boolean;
+  setHasFixingBar: (v: boolean) => void;
+
   fixBarColor: MetalColorMode;                 // "Cor barra fixação"
   setFixBarColor: (m: MetalColorMode) => void;
 
@@ -86,7 +89,7 @@ const DEFAULT_HANDLE_DEPTHS: Record<string, number> = {
   Handle_3: -0.018,
   Handle_4: 0.012,
   Handle_5: 0.012,
-  Handle_6: 0.022,
+  Handle_6: 0.028,
   Handle_7: 0.021,
   Handle_8: -0.01,
   // keep adding as you add files
@@ -94,7 +97,7 @@ const DEFAULT_HANDLE_DEPTHS: Record<string, number> = {
 
 export const useSim = create<SimState>((set, get) => ({
   // -------- scene selection --------
-  model: 'DiplomataGold_V3',
+  model: 'Sterling_V1',
   stage: 1,
   setModel: (model) => {
     // Reset EVERYTHING when the *model* changes
@@ -185,6 +188,9 @@ export const useSim = create<SimState>((set, get) => ({
 
   shelfCorner: 0,
   setShelfCorner: (c) => set({ shelfCorner: c }),
+
+  hasFixingBar: true,                       // default; will be probed by Viewer
+  setHasFixingBar: (v) => set({ hasFixingBar: v }),
 
   fixBarColor: 'default',
   setFixBarColor: (m) => set({ fixBarColor: m }),
