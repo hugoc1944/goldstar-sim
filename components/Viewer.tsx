@@ -434,24 +434,12 @@ function restoreFromSnapshot(mm: any, snap?: THREE.Material | null) {
   }
 }
 
-// File names case insesitive
-function canonicalVariantName(variant: string) {
-  // force the trailing `_v<number>` to use lowercase `v`, regardless of how state stores it
-  // matches ..._v2 / ..._V2 / ..._v12 / ..._V12 at the end of the string
-  return variant.replace(/_v(\d+)$/i, (_m, d) => `_v${d}`);
-}
-
 function Product() {
 
     // ---------- scene selection ----------
-  const modelRaw = useSim(s => s.model);               // e.g. "Sterling_V2"
-  const model = React.useMemo(() => canonicalVariantName(modelRaw), [modelRaw]);
+  const model = useSim((s) => s.model);  // e.g. "DiplomataGold_V5"
   const stage = useSim((s) => s.stage);  // 1 | 2
   const sceneFile = `/glb/SCENE_${stage}_${model}.glb`;
-  const gltf = useGLTF(sceneFile);
-  // Preload both stages for the *current* model (lightweight + snappy switching)
-  useGLTF.preload(`/glb/SCENE_1_${model}.glb`);
-  useGLTF.preload(`/glb/SCENE_2_${model}.glb`);
   //Fix model change crash (dispose customizations)
   function disposeSubtree(node: THREE.Object3D) {
     node.traverse((n: any) => {
@@ -462,7 +450,10 @@ function Product() {
     });
   }
 
-
+  const gltf = useGLTF(sceneFile);
+  // Preload both stages for the *current* model (lightweight + snappy switching)
+  useGLTF.preload(`/glb/SCENE_1_${model}.glb`);
+  useGLTF.preload(`/glb/SCENE_2_${model}.glb`);
 
   const currentSwapRoots = useRef<Set<THREE.Object3D>>(new Set()); // Handle
 
