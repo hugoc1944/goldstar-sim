@@ -5,12 +5,12 @@ import { FINISHES } from '@/lib/finishes';
 import { getShelfPresetForModel } from '@/lib/shelfPresets';
 import type { FinishName } from '@/lib/finishes';
 import { getRulesForVariant } from '@/lib/modelCatalog';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
+import { parseModelBase } from '@/lib/modelCatalog';
 
 export default function Panels() {
   const animPlaying = useSim(s => s.animPlaying);
   const toggleAnim  = useSim(s => s.toggleAnim);
-  const setHandle   = useSim(s => s.setHandle);
   const silk = useSim(s => s.silk);
   const setSilk     = useSim(s => s.setSilk);
   const glassFinish    = useSim(s => s.glassFinish);
@@ -24,10 +24,53 @@ export default function Panels() {
   const fixBarColor = useSim(s => s.fixBarColor);      // 'default' | 'finish'
   const setFixBarColor = useSim(s => s.setFixBarColor);
   const hasFixingBar = useSim(s => s.hasFixingBar);
-  
-  const model = useSim(s => s.model);
-  const rules = getRulesForVariant(model);
 
+  const model = useSim(s => s.model);
+  const base  = parseModelBase(model);         // e.g. "Strong"
+  const isStrong = base.toLowerCase() === 'strong';
+  // 🔹 Only Diplomatagold_v8 should hide grab handles (5–7)
+  const HIDE_GRAB_FOR = new Set(['diplomatagold_v9']);
+  const hideGrabHandles = HIDE_GRAB_FOR.has((model ?? '').toLowerCase());
+  const rules = getRulesForVariant(model);
+  const handleUrl = useSim(s => s.handleUrl);
+  const setHandle   = useSim(s => s.setHandle);
+  const handleKey = useSim(s => s.handleKey);
+  // Only these variants get "Sem Puxador"
+  const NO_HANDLE_ALLOWED = useMemo(() => new Set([
+    'sterling_v4',
+    'diplomatagold_v6',
+    'painel_v2',
+    'painel_v3',
+    'painel_v4',
+  ]), []);
+  const canRemoveHandle = NO_HANDLE_ALLOWED.has((model ?? '').toLowerCase());
+  // safety: if user leaves Strong while Handle_8 is selected, revert to default
+  useEffect(() => {
+    if (!isStrong && /Handle_8\.glb$/i.test(handleUrl ?? '')) {
+      setHandle(''); // back to default/original
+    }
+  }, [isStrong, handleUrl, setHandle]);
+  useEffect(() => {
+    if (!isStrong) return;
+    // treat "", null, undefined as "no choice"
+    const noChoiceYet = !handleKey && !handleUrl;
+
+    if (noChoiceYet) {
+      setHandle('/handles/Handle_6.glb');
+    }
+  }, [isStrong, handleKey, handleUrl, setHandle]);
+  //Hide handles 6-8 for diplomata gold v9
+    useEffect(() => {
+    if (!hideGrabHandles) return;
+    const isGrab =
+      handleKey ? /^Handle_[567]$/.test(handleKey) :
+      /\/Handle_[567]\.glb$/i.test(handleUrl ?? '');
+    if (isGrab) {
+      // Pick a safe fallback: original/default (no swap).
+      setHandle('');
+    }
+  }, [hideGrabHandles, handleKey, handleUrl, setHandle]);
+  
   // Split finishes, but remove any forbidden ones first
   const METALLICS = new Set(['Cromado', 'Anodizado']);
   const removed = new Set(rules.removeFinishes ?? []);
@@ -56,7 +99,6 @@ export default function Panels() {
     // run on model / rules change or when the user’s current finish becomes invalid
   }, [/* deps: */ model, rules, finish, allowedFinishes, setFinish]);
     const showHandles = !(rules.hideHandles ?? false);
-    const handleKey = useSim(s => s.handleKey);
     const setHandleLocal = useSim(s => s.setHandle);
     useEffect(() => {
     if (!showHandles) {
@@ -64,6 +106,33 @@ export default function Panels() {
       setHandle('');
     }
   }, [showHandles, setHandle]);
+    const HANDLES_BASE = [
+    { label: 'Puxador 1', key: 'Handle_1', url: '/handles/Handle_1.glb' },
+    { label: 'Puxador 2', key: 'Handle_2', url: '/handles/Handle_2.glb' },
+    { label: 'Puxador 3', key: 'Handle_3', url: '/handles/Handle_3.glb' },
+    { label: 'Puxador 4', key: undefined,   url: '' }, // default/original
+    { label: 'Puxador 5', key: 'Handle_5', url: '/handles/Handle_5.glb' },
+    { label: 'Puxador 6', key: 'Handle_6', url: '/handles/Handle_6.glb' },
+    { label: 'Puxador 7', key: 'Handle_7', url: '/handles/Handle_7.glb' },
+  ];
+
+  // Only Strong gets Handle 8
+  const HANDLES = isStrong
+  ? [
+      // On Strong, let “Puxador 4” be an actual swap to Handle_4:
+      { label: 'Puxador 1', key: 'Handle_1', url: '/handles/Handle_1.glb' },
+      { label: 'Puxador 2', key: 'Handle_2', url: '/handles/Handle_2.glb' },
+      { label: 'Puxador 3', key: 'Handle_3', url: '/handles/Handle_3.glb' },
+      { label: 'Puxador 4', key: 'Handle_4', url: '/handles/Handle_4.glb' }, // <- changed here
+      { label: 'Puxador 5', key: 'Handle_5', url: '/handles/Handle_5.glb' },
+      { label: 'Puxador 6', key: 'Handle_6', url: '/handles/Handle_6.glb' },
+      { label: 'Puxador 7', key: 'Handle_7', url: '/handles/Handle_7.glb' },
+      { label: 'Puxador 8', key: 'Handle_8', url: '/handles/Handle_8.glb' }, // Strong-only
+    ]
+  : HANDLES_BASE;
+  const HANDLES_VISIBLE = hideGrabHandles
+    ? HANDLES.filter(h => !/^Handle_[567]$/.test(h.key ?? ''))
+    : HANDLES;
   // Glass visibility (transparent is always allowed)
   const allowGlass = new Set(rules.allowGlass ?? ['transparent', 'frosted']);
   const showFrosted    = allowGlass.has('frosted');
@@ -110,26 +179,40 @@ export default function Panels() {
         <section>
           <h3 className="font-semibold mb-2">Puxadores</h3>
 
-          {/* no IIFE here; just use the values we hooked above */}
           <div className="grid grid-cols-2 gap-2 max-h-56 overflow-auto pr-1">
-            {[
-              { label: 'Puxador 1', key: 'Handle_1', url: '/handles/Handle_1.glb' },
-              { label: 'Puxador 2', key: 'Handle_2', url: '/handles/Handle_2.glb' },
-              { label: 'Puxador 3', key: 'Handle_3', url: '/handles/Handle_3.glb' },
-              { label: 'Puxador 4', key: undefined,   url: '' },
-              { label: 'Puxador 5', key: 'Handle_5', url: '/handles/Handle_5.glb' },
-              { label: 'Puxador 6', key: 'Handle_6', url: '/handles/Handle_6.glb' },
-              { label: 'Puxador 7', key: 'Handle_7', url: '/handles/Handle_7.glb' },
-            ].map(h => {
-              const isActive = (k?: string) => (k ? handleKey === k : !handleKey);
+            {canRemoveHandle && (
+              <button
+                key="__none__"
+                onClick={() => setHandle('__none__')}
+                className={`px-3 py-1 rounded border text-left ${
+                  handleUrl === '__none__' ? 'bg-black text-white' : 'hover:bg-black/5'
+                }`}
+                aria-pressed={handleUrl === '__none__'}
+                title="Sem Puxador"
+              >
+                Sem Puxador
+              </button>
+            )}
+            
+            {HANDLES_VISIBLE.map(h => {
+              const isActive = (h: { key?: string; url: string }) => {
+                // If the handle has a key (e.g. 'Handle_6'):
+                // - highlight if either the store key matches OR the store URL matches
+                if (h.key) return handleKey === h.key || handleUrl === h.url;
+
+                // If the handle has no key (default/original):
+                // - highlight when neither a key nor a URL is set (back to original)
+                return !handleKey && !handleUrl;
+              };
+
               return (
                 <button
                   key={h.key ?? 'default'}
-                  onClick={() => setHandleLocal(h.url)}
+                  onClick={() => setHandle(h.url)}
                   className={`px-3 py-1 rounded border text-left ${
-                    isActive(h.key) ? 'bg-black text-white' : 'hover:bg-black/5'
+                    isActive(h) ? 'bg-black text-white' : 'hover:bg-black/5'
                   }`}
-                  aria-pressed={isActive(h.key)}
+                  aria-pressed={isActive(h)}
                   title={h.label}
                 >
                   {h.label}

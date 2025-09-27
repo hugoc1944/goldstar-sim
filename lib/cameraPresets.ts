@@ -1,4 +1,5 @@
 // /lib/cameraPresets.ts
+import * as THREE from 'three';
 export type Vec3 = [number, number, number];
 
 export type Pose = {
@@ -13,6 +14,8 @@ export type ShowerPreset = {
   clampExtents: ClampExtents;     // how far the target is allowed to move around the shower
   minDistance?: number;           // optional per-model OrbitControls minDistance in shower mode
   maxDistance?: number;           // optional per-model OrbitControls maxDistance in shower mode
+  azimuth?: { min: number; max: number }; // radians, optional (limits left/right rotation)
+  polar?:   { min: number; max: number }; // up/down  (radians)
 };
 
 export type ModelPreset = {
@@ -171,20 +174,22 @@ const CAM_LOOK: [number, number, number] = [0.419, 1.193, -0.681];*/
       maxDistance: 1.9,
     },
     hotspot: [0.61, 1.28, -0.18],
-  },
+  },// Pick a pose that works for your room
   DiplomataGold_V10: {
     overview: {
-      pos:  [-0.214, 1.402, 0.889],
+      pos:  [1.336, 1.529, 1.734],
       look: [0.457, 1.225, -0.683],
     },
     shower: {
       pose: {
-        pos:  [-0.247, 1.449, 0.757],
-        look: [0.465, 1.213, -0.680],
+        pos:  [0.514, 1.417, 1.103],
+        look: [0.471, 1.194, -0.679],
       },
-      clampExtents: { x: 0.28, y: 0.22, z: 0.28 },
+      clampExtents: { x: 0.18, y: 0.15, z: 0.10 },
       minDistance: 0.07,
-      maxDistance: 1.9,// Pick a pose that works for your room
+      maxDistance: 1.8,// Pick a pose that works for your room
+      azimuth: { min: -0.55, max: 0.55 },      // optional: limit rotation ±31°
+      polar:   { min: THREE.MathUtils.degToRad(75), max: THREE.MathUtils.degToRad(110) },
     },
     hotspot: [0.61, 1.28, -0.18],
   },
@@ -344,17 +349,17 @@ const CAM_LOOK: [number, number, number] = [0.792, 1.242, -0.354];;*/
   },// Pick a pose that works for your room
   Strong_V2: {
     overview: {
-      pos:  [-0.996, 1.499, 1.978],
-      look: [0.075, 1.366, -0.356],
+      pos:  [0.405, 1.460, 2.350],
+      look: [0.473, 1.536, -0.355],
     },
     shower: {
       pose: {
-        pos:  [0.659, 1.392, 1.278],
-        look: [0.679, 1.183, -0.506],
+        pos:  [0.688, 1.371, 0.220],
+        look: [0.686, 1.322, -0.333],
       },
       clampExtents: { x: 0.25, y: 0.20, z: 0.25 },
       minDistance: 0.07,
-      maxDistance: 1.7,
+      maxDistance: 1.2,
     },
     hotspot: [0.66, 1.3, -0.15],
   },

@@ -706,10 +706,39 @@ function copyFinishFromSample(sample: THREE.MeshStandardMaterial, targets: THREE
 const handleUrl = useSim(s => s.handleUrl);
 const handleDepth = useSim(s => s.handleDepth); // you already have this in state
 const hasFlipToken = (s: string) => /\bflip\b/i.test(s); // matches "...flip", "_flip", ".flip", etc.
+const isStrong = /^strong_/i.test(model); // base name "Strong"
+const isPainel = /^painel/i.test(model);
+const PAINEL_KNOB_EXTRA_MM = 18;
+
 
 // keep originals per mesh (material + drawRange)
 const originalMatByMesh = useRef(new WeakMap<THREE.Mesh, THREE.Material|THREE.Material[]>());
 const originalRangeByMesh = useRef(new WeakMap<THREE.Mesh, {start:number,count:number}>());
+
+// Strong handle fix
+type StrongHandleFix = {
+  rot?: [number, number, number];   // Euler (X,Y,Z) in radians, applied in XYZ order
+  extraDepthMM?: number;            // extra standoff in millimeters, +/- allowed
+  invertDepth?: boolean;            // rarely needed; try rotation first
+  offsetZMM?: number;   // ← left/right in local space
+};
+
+const STRONG_CORRECT: Record<string, StrongHandleFix> = {
+  // Small knobs (1–4). Start with +90° around Z; if still sideways, add +90° around Y.
+  // You can tweak these quickly without code changes elsewhere.
+  Handle_1: { rot: [0, Math.PI / 2, Math.PI / 2], extraDepthMM: 78 },
+  Handle_2: { rot: [0, Math.PI / 2, Math.PI / 2], extraDepthMM: 78 },
+  Handle_3: { rot: [0, 0, Math.PI / 2],          extraDepthMM: 74 },
+  Handle_4: { rot: [0, Math.PI / 2, Math.PI / 2],          extraDepthMM: 49 },
+  Handle_5: { extraDepthMM: -23 },
+  Handle_6: { extraDepthMM: -28 },
+  // Long bar: lands on the wrong side by default; flip 180° about Z is robust.
+  Handle_7: { rot: [0, 0, Math.PI],              extraDepthMM: -27 },
+  Handle_8: { extraDepthMM: 49, offsetZMM: -9},
+
+  // If any handle sticks too far in/out on Strong, set extraDepthMM per piece:
+  // e.g. Handle_1: { rot: [0,Math.PI/2,Math.PI/2], extraDepthMM: -4 }
+};
 
 useEffect(() => {
   const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, '');
@@ -779,30 +808,19 @@ useEffect(() => {
       }
     });
   };
-
-  const applyAluminumFinish = (node: THREE.Object3D) => {
-    const sample = lastAluminumSample.current;
-    if (!sample) return;
-    const targets: THREE.MeshStandardMaterial[] = [];
-    node.traverse(x => {
-      const mat: any = (x as any).material;
-      const grab = (mm: any) => { if (mm?.isMeshStandardMaterial && isAluminum(mm)) targets.push(mm); };
-      Array.isArray(mat) ? mat.forEach(grab) : grab(mat);
-    });
-    targets.forEach(t => {
-      t.copy(sample);
-      t.color.copy(sample.color);
-      (t as any).envMapIntensity = (sample as any).envMapIntensity ?? 1.0;
-      t.needsUpdate = true;
-    });
-  };
   // ----------------------------------------------------------------------
 
   // “default handle” selected → put originals back
-  if (!handleUrl) {
-    roots.forEach(r => { clearPreviousSwap(r); restoreOriginalGeometry(r); });
-    return;
-  }
+    if (handleUrl === '__none__') {
+      roots.forEach(r => { clearPreviousSwap(r); hideOriginalGeometry(r); });
+      return;
+    }
+
+    // “default” (empty/undefined) → restore the original handles
+    if (!handleUrl) {
+      roots.forEach(r => { clearPreviousSwap(r); restoreOriginalGeometry(r); });
+      return;
+    }
 
   const loader = new GLTFLoader();
   let cancelled = false;
@@ -814,47 +832,111 @@ useEffect(() => {
 
       roots.forEach(r => {
         clearPreviousSwap(r);
+
+        // --- find host first-mesh local (relative to r) ---
+        gltf.scene.updateMatrixWorld(true);
+        let hostFirst: THREE.Object3D | null = null;
+        r.traverse((n: THREE.Object3D) => { if (!hostFirst && (n as any).isMesh) hostFirst = n; });
+        const hostLocal = new THREE.Matrix4();
+        if (hostFirst) {
+          const invRoot = new THREE.Matrix4().copy((r as THREE.Object3D).matrixWorld).invert();
+          hostLocal.multiplyMatrices(invRoot, (hostFirst as THREE.Object3D).matrixWorld);
+        } else {
+          hostLocal.identity();
+        }
+
+        // hide original geometry (keeps the node/basis)
         hideOriginalGeometry(r);
 
+        // clone incoming handle
         const swap = src.scene.clone(true);
         swap.name = 'HandleSwapRoot';
-        
-        // --- token-based flip/offset ---------------------------------------------
+
+        // --- compute adaptor only when needed (Strong) ---
+        let adaptor = new THREE.Matrix4().identity();
+        if (isStrong) {
+          let srcFirst: THREE.Object3D | null = null;
+          src.scene.traverse((n: THREE.Object3D) => { if (!srcFirst && (n as any).isMesh) srcFirst = n; });
+          const srcLocal = srcFirst ? (srcFirst as THREE.Object3D).matrix.clone() : new THREE.Matrix4().identity();
+
+          const invSrcLocal = new THREE.Matrix4().copy(srcLocal).invert();
+          adaptor.multiplyMatrices(hostLocal, invSrcLocal);
+          swap.applyMatrix4(adaptor);
+        } else {
+          swap.position.set(0, 0, 0);
+          swap.rotation.set(0, 0, 0);
+          swap.scale.set(1, 1, 1);
+        }
+        const hName = (handleUrl ?? '').split('/').pop() ?? '';
+        if (!isStrong && /Handle_8\.glb$/i.test(hName)) {
+          // ignore it on non-Strong models
+          roots.forEach(r => { clearPreviousSwap(r); restoreOriginalGeometry(r); });
+          return;
+        }
+
+        // --- Strong-only per-handle correction (after adaptor, before depth) ---
+        let depthSign = 1;
+        let extraDepthMetersFromFix = 0;
+        let extraOffsetZMeters = 0;
+
+        if (isStrong) {
+          const hName = (handleUrl ?? '').split('/').pop() ?? '';
+          const base = hName.replace(/\.glb$/i, '');
+          const fix = STRONG_CORRECT[base];
+
+          if (fix?.rot) {
+            const [rx, ry, rz] = fix.rot;
+            swap.rotateX(rx);
+            swap.rotateY(ry);
+            swap.rotateZ(rz);
+          }
+          if (fix?.invertDepth) depthSign = -1;
+          if (typeof fix?.extraDepthMM === 'number') {
+            extraDepthMetersFromFix = fix.extraDepthMM / 1000;
+          }
+          if (typeof fix?.offsetZMM === 'number') {
+            extraOffsetZMeters = fix.offsetZMM / 1000;
+          }
+        }
+
+        // ---- existing flip/depth tokens (unchanged) ----
         const rawLower = (r.name || '').trim().toLowerCase();
-
-        // Only long grab handles (5–7) need flipping logic.
-        // If you want it for all, you can drop the isGrabHandle guard.
         const isGrabHandle = /handle_(5|6|7)(?:\.glb)?$/i.test(handleUrl ?? '');
-
-        // Flip tokens: "_flip", "_flipx", "_flipz"
         const hasFlip = /(^|[^a-z])flip([^a-z]|$)/i.test(rawLower);
         const flipX   = /(^|[^a-z])flipx([^a-z]|$)/i.test(rawLower);
         const flipZ   = /(^|[^a-z])flipz([^a-z]|$)/i.test(rawLower);
+        const flipAxis: 'x' | 'z' | null = isGrabHandle ? (flipX ? 'x' : (flipZ || hasFlip ? 'z' : null)) : null;
 
-        const flipAxis: 'x' | 'z' | null = isGrabHandle
-          ? (flipX ? 'x' : (flipZ || hasFlip ? 'z' : null))
-          : null;
-
-        // Optional extra standoff in mm via "_dNN" (e.g. _d6)
-        const depthTok = rawLower.match(/(^|[^a-z])d(\d+(?:\.\d+)?)([^a-z]|$)/i);
-        const extraDepthMM = depthTok ? parseFloat(depthTok[2]) : 0;
-
-        // Reset transform
-        swap.position.set(0, 0, 0);
-        swap.rotation.set(0, 0, 0);
-        swap.scale.set(1, 1, 1);
-
-        // Apply flip when requested
         if (flipAxis === 'x') swap.rotateX(Math.PI);
         if (flipAxis === 'z') swap.rotateZ(Math.PI);
 
-        // Single outward offset (no double-translate)
-        const DOT_EXTRA = 0.04; // small stand-off for grab handles when flipped
-        const base = handleDepth;
-        const extraMeters = (extraDepthMM / 1000) + (flipAxis ? DOT_EXTRA : 0);
-        const d = base + extraMeters;
-        if (d) swap.translateY(d);
-        // attach and paint
+        // ---- Painel-specific extra depth for NON-grab handles ----
+        let extraDepthMetersFromPainel = 0;
+        if (isPainel) {
+          // If the *selected* handle is NOT a grab bar (5/6/7), add the bump
+          const nameOnly = (handleUrl ?? '').split('/').pop() ?? '';
+          const isGrab = /handle_(5|6|7)(?:\.glb)?$/i.test(nameOnly);
+          if (!isGrab) extraDepthMetersFromPainel = PAINEL_KNOB_EXTRA_MM / 1000;
+        }
+
+        const DOT_EXTRA = 0.04;
+        const depthTok = rawLower.match(/(^|[^a-z])d(\d+(?:\.\d+)?)([^a-z]|$)/i);
+        const extraDepthMMFromToken = depthTok ? parseFloat(depthTok[2]) : 0;
+
+        // final standoff in meters
+        const d =
+          (handleDepth) +
+          (extraDepthMMFromToken / 1000) +
+          (flipAxis ? DOT_EXTRA : 0) +
+          (extraDepthMetersFromFix) +          // Strong per-handle tuning you already have
+          (extraDepthMetersFromPainel);        // ← NEW (Painel-only)
+
+        if (d) swap.translateY(d * depthSign);
+        if (Math.abs(extraOffsetZMeters) > 1e-6) {
+          swap.translateZ(extraOffsetZMeters);
+        }
+
+        // attach + paint
         r.add(swap);
         currentSwapRoots.current.add(swap);
         applyFinishToNode(swap, lastAluminumSample.current);
@@ -1430,15 +1512,18 @@ useEffect(() => {
             - shower: limited free movement */}
         <OrbitControls
           ref={controlsRef}
-          enabled={mode === 'shower' && !animating} //mode === 'shower' && !animating
+          enabled={true} //mode === 'shower' && !animating
           enablePan={true}
           // allow super close inspections
-          minDistance={mode === 'shower' ? minDistance : 0.01}
+          /*minDistance={mode === 'shower' ? minDistance : 0.01}
           maxDistance={mode === 'shower' ? maxDistance  : 50}
-          minPolarAngle={THREE.MathUtils.degToRad(35)}
-          maxPolarAngle={THREE.MathUtils.degToRad(110)}
           zoomSpeed={1.2}
           rotateSpeed={0.95}
+          minAzimuthAngle={preset.shower.azimuth?.min ?? -Infinity}
+          maxAzimuthAngle={preset.shower.azimuth?.max ??  Infinity}
+          // up/down rotation limits (NEW)
+          minPolarAngle={preset.shower.polar?.min ?? THREE.MathUtils.degToRad(35)}
+          maxPolarAngle={preset.shower.polar?.max ?? THREE.MathUtils.degToRad(110)}*/
         />
         <FixedCamera controlsRef={controlsRef} preset={preset} />
         <CameraSnap controlsRef={controlsRef} />

@@ -121,7 +121,7 @@ export const MODEL_CATALOG: ModelEntry[] = [
         hideAcrylics: true,
     }
   },
-  /*{
+  {
     section: 'Portas de Correr',
     baseName: 'Strong',
     variants: [
@@ -136,7 +136,7 @@ export const MODEL_CATALOG: ModelEntry[] = [
         removeFinishes: ['Cromado'],
         hideAcrylics: true
     }
-  },*/
+  },
   // Add more base models here…
 ];
 

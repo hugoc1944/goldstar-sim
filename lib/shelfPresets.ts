@@ -122,17 +122,16 @@ const PRESETS: Record<string, ShelfPreset> = {
   },
   Strong_V2: {
     allowCorner2: true,
-    corner1: { pos: [0.23, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
-    corner2: { pos: [1.55, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+    corner1: { pos: [1.455, 1.06, -2.14], zStage2: -2.135, rotY: 0, scale: 1.0 },
+    corner2: { pos: [0.176, 1.06, -2.14], zStage2: -2.135, rotY: 1*Math.PI, scale: 1.0 },
   },
   Strong_V3: {
-    allowCorner2: true,
-    corner1: { pos: [0.16, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
-    corner2: { pos: [1.45, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
+    allowCorner2: false,
+    corner1: { pos: [1.55, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
   },
   Strong_V4: {
     allowCorner2: true,
-    corner1: { pos: [0.120, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
+    corner1: { pos: [0.16, 1.06, -1.225], zStage2: -1.20, rotY: 1*Math.PI, scale: 1.0 },
     corner2: { pos: [1.45, 1.06, -1.22], zStage2:-1.2, rotY: 0, scale: 1.0},
   },
   //Painel Fixo
